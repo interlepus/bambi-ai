@@ -1,10 +1,13 @@
 ;==================================================================================
-; THE MASTER - v0.2
+; THE MASTER - v0.3
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Game plan : Scouts -> Knights -> Paladins, with reactive counters.
 ; Scope     : 1v1, Arabia, vs a random-civ DE AI (target: Hardest).
 ; Author    : interlepus@yahoo.com
 ;
+; v0.3: fix AoE2 binary-operator syntax (or/and/nand take exactly 2 args) that broke
+;       v0.2 loading at the villager rule; make the Feudal click win the food race vs
+;       villager production; add a "cannot click Feudal" diagnostic line.
 ; v0.2 changelog (economy/opening fixes from v0.1 game review):
 ;  - Scout now explores HOME first (was leaving immediately: sn-home-exploration-time).
 ;  - Dark Age is FOOD-FIRST so the Town Center never idles (idle TC = lost eco).
@@ -27,7 +30,7 @@
 (defrule
 	(game-time > 4)
 =>
-	(chat-to-all "The Master v0.2 -- Meistar. GL HF!")
+	(chat-to-all "The Master v0.3 -- Meistar. GL HF!")
 	(disable-self)
 )
 ;endregion
@@ -149,11 +152,15 @@
 	(civilian-population < 95)
 	(population-headroom > 0)
 	(housing-headroom > 0)
-	(or
-		(not (current-age == dark-age))
-		(up-research-status c: feudal-age c:>= research-pending)
-		(civilian-population < 24)
-		(food-amount >= 500)
+	; Keep the TC pumping; pause ONLY the instant we're ready to click Feudal
+	; (dark age, not yet aging, 500 food banked) so the age-up rule wins the food.
+	; NOTE: AoE2 and/or/nand are BINARY (exactly 2 args) — never list 3+.
+	(nand
+		(current-age == dark-age)
+		(and
+			(not (up-research-status c: feudal-age c:>= research-pending))
+			(can-research feudal-age)
+		)
 	)
 =>
 	(train villager)
@@ -495,6 +502,18 @@
 	(set-escrow-percentage food 25)
 	(set-escrow-percentage wood 25)
 	(chat-to-player my-player-number "[MASTER] Clicking FEUDAL")
+)
+
+; DIAGNOSTIC: 500 food in Dark Age but still can't click -> building prerequisite.
+; Report once so we know exactly what's blocking the age-up.
+(defrule
+	(goal gl-debug on)
+	(current-age == dark-age)
+	(food-amount >= 500)
+	(not (can-research feudal-age))
+=>
+	(chat-to-player my-player-number "[MASTER] 500 food but cannot click Feudal (building prereq?)")
+	(disable-self)
 )
 
 (defrule
