@@ -1,0 +1,3 @@
+; The Master - AoE2 DE AI
+; All logic lives in "The Master.per". This .ai file only needs to exist so the
+; game lists the AI. It can be left as just this comment (or empty).
