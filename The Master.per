@@ -1,10 +1,14 @@
 ;==================================================================================
-; THE MASTER - v0.5
+; THE MASTER - v0.6
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Game plan : Scouts -> Knights -> Paladins, with reactive counters.
 ; Scope     : 1v1, Arabia, vs a random-civ DE AI (target: Hardest).
 ; Author    : interlepus@yahoo.com
 ;
+; v0.6: TC-idle root fix from a Bambi read — force food drop-off when food < 50
+;       (up-drop-resources, NOT duc); Loom early (food-idle / ~13 pop) instead of 18;
+;       removed the panic food<120 boar-fallback that pulled vils off sheep; first
+;       lumber camp at 7 vils (not 6) so the opening 6 stay on food.
 ; v0.5: boar timing fixed (hold until ~14 vils so ~6 stay on sheep and the TC keeps
 ;       eating; v0.4 sent EVERY food vil to the boar, killing food income); less Feudal
 ;       gold (it was piling with no sink); removed the noisy Feudal-prereq diagnostic.
@@ -39,7 +43,7 @@
 (defrule
 	(game-time > 4)
 =>
-	(chat-to-all "The Master v0.5 -- Meistar. GL HF!")
+	(chat-to-all "The Master v0.6 -- Meistar. GL HF!")
 	(disable-self)
 )
 ;endregion
@@ -154,32 +158,19 @@
 ;endregion
 
 ;region BOAR TIMING ================================================================
-; Hold boar until ~14 vils: when ~5 hunters leave for it, ~6+ stay on sheep and the
-; TC keeps eating. (v0.4 enabled at 8 vils -> every food vil ran to the boar and food
-; income died.) Boar is *blocked* via lure-group-size 1000 and *unblocked* by =1.
+; Take boar at ~13 vils with only 4 hunters, so ~5-6 stay on food and the TC keeps
+; eating. The anti-idle food drop-off covers any short dip, so we no longer panic-hunt
+; the boar early (that was pulling vils off sheep and crashing food). Boar is *blocked*
+; via lure-group-size 1000 and *unblocked* by =1.
 (defrule
 	(current-age == dark-age)
-	(civilian-population >= 14)
-	(strategic-number sn-minimum-boar-lure-group-size != 1)
-=>
-	(set-strategic-number sn-enable-boar-hunting 1)
-	(set-strategic-number sn-minimum-number-hunters 5)
-	(set-strategic-number sn-minimum-boar-lure-group-size 1)
-	(chat-to-player my-player-number "[MASTER] Boar on (enough food vils to spare)")
-)
-
-; Fallback: if sheep run dry early (food crashing), take the boar sooner with fewer
-; hunters rather than starve.
-(defrule
-	(current-age == dark-age)
-	(food-amount < 120)
-	(civilian-population >= 9)
+	(civilian-population >= 13)
 	(strategic-number sn-minimum-boar-lure-group-size != 1)
 =>
 	(set-strategic-number sn-enable-boar-hunting 1)
 	(set-strategic-number sn-minimum-number-hunters 4)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1)
-	(chat-to-player my-player-number "[MASTER] Boar early (food low / sheep gone)")
+	(chat-to-player my-player-number "[MASTER] Boar on (~13 vils)")
 )
 ;endregion
 
@@ -203,6 +194,17 @@
 	)
 =>
 	(train villager)
+)
+;endregion
+
+;region ANTI-IDLE: KEEP THE TC FED ================================================
+; The TC must never idle for lack of food. Force food-gatherers to deposit their
+; carried load the moment food drops below a villager's cost (Bambi's non-DUC trick).
+(defrule
+	(current-age <= feudal-age)
+	(food-amount < 50)
+=>
+	(up-drop-resources food c: 5)
 )
 ;endregion
 
@@ -362,10 +364,11 @@
 	(build house)
 )
 
-; FIRST lumber camp EARLY (before mill/farms) so wood income starts on time.
+; FIRST lumber camp once the opening sheep economy is rolling (~7 vils) — kept off the
+; very first 6 so they stay on food and the TC never stalls.
 (defrule
 	(building-type-count-total lumber-camp < 1)
-	(civilian-population >= 6)
+	(civilian-population >= 7)
 	(can-build lumber-camp)
 	(up-pending-objects c: lumber-camp < 1)
 =>
@@ -588,9 +591,10 @@
 ;endregion
 
 ;region RESEARCH: ECONOMY ==========================================================
-; Loom by 18 pop, or instantly if attacked (don't lose vils naked).
+; Loom early: when food is too low to start a villager (fills a TC cycle with our
+; starting gold + protects vils), or by ~13 pop, or instantly if attacked.
 (defrule
-	(or (civilian-population >= 18) (town-under-attack))
+	(or (food-amount < 45) (or (civilian-population >= 13) (town-under-attack)))
 	(can-research ri-loom)
 =>
 	(research ri-loom)
