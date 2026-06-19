@@ -1,10 +1,15 @@
 ;==================================================================================
-; THE MASTER - v0.4
+; THE MASTER - v0.5
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Game plan : Scouts -> Knights -> Paladins, with reactive counters.
 ; Scope     : 1v1, Arabia, vs a random-civ DE AI (target: Hardest).
 ; Author    : interlepus@yahoo.com
 ;
+; v0.5: boar timing fixed (hold until ~14 vils so ~6 stay on sheep and the TC keeps
+;       eating; v0.4 sent EVERY food vil to the boar, killing food income); less Feudal
+;       gold (it was piling with no sink); removed the noisy Feudal-prereq diagnostic.
+;       Folded in a meta scan of Bambi/Horde/Barbarian/Odette (boar blocked via a huge
+;       lure-group-size; ~5 hunters; never over-gather gold pre-Castle).
 ; v0.4: Feudal eco rebalance (more wood, far less gold) + build-priority fixes so
 ;       barracks->stable->scouts arrive on time (farms/blacksmith were eating the wood
 ;       before the barracks could afford 175). Barracks now goes up DURING the Feudal
@@ -34,7 +39,7 @@
 (defrule
 	(game-time > 4)
 =>
-	(chat-to-all "The Master v0.4 -- Meistar. GL HF!")
+	(chat-to-all "The Master v0.5 -- Meistar. GL HF!")
 	(disable-self)
 )
 ;endregion
@@ -106,8 +111,8 @@
 	(set-strategic-number sn-intelligent-gathering 1)
 	(set-strategic-number sn-livestock-to-town-center 1)
 	(set-strategic-number sn-enable-boar-hunting 0)
-	(set-strategic-number sn-minimum-number-hunters 5)
-	(set-strategic-number sn-minimum-boar-lure-group-size 1)
+	(set-strategic-number sn-minimum-number-hunters 0)
+	(set-strategic-number sn-minimum-boar-lure-group-size 1000)
 	(set-strategic-number sn-maximum-hunt-drop-distance 24)
 	(set-strategic-number sn-maximum-food-drop-distance 24)
 	(set-strategic-number sn-maximum-gold-drop-distance 30)
@@ -149,14 +154,32 @@
 ;endregion
 
 ;region BOAR TIMING ================================================================
-; Hold boar until ~8 vils (first 6 on sheep). With <6 vils boar dies too slowly and
-; the long carry delays TC drop-off.
+; Hold boar until ~14 vils: when ~5 hunters leave for it, ~6+ stay on sheep and the
+; TC keeps eating. (v0.4 enabled at 8 vils -> every food vil ran to the boar and food
+; income died.) Boar is *blocked* via lure-group-size 1000 and *unblocked* by =1.
 (defrule
 	(current-age == dark-age)
-	(civilian-population >= 8)
-	(strategic-number sn-enable-boar-hunting != 1)
+	(civilian-population >= 14)
+	(strategic-number sn-minimum-boar-lure-group-size != 1)
 =>
 	(set-strategic-number sn-enable-boar-hunting 1)
+	(set-strategic-number sn-minimum-number-hunters 5)
+	(set-strategic-number sn-minimum-boar-lure-group-size 1)
+	(chat-to-player my-player-number "[MASTER] Boar on (enough food vils to spare)")
+)
+
+; Fallback: if sheep run dry early (food crashing), take the boar sooner with fewer
+; hunters rather than starve.
+(defrule
+	(current-age == dark-age)
+	(food-amount < 120)
+	(civilian-population >= 9)
+	(strategic-number sn-minimum-boar-lure-group-size != 1)
+=>
+	(set-strategic-number sn-enable-boar-hunting 1)
+	(set-strategic-number sn-minimum-number-hunters 4)
+	(set-strategic-number sn-minimum-boar-lure-group-size 1)
+	(chat-to-player my-player-number "[MASTER] Boar early (food low / sheep gone)")
 )
 ;endregion
 
@@ -261,9 +284,9 @@
 	(current-age == feudal-age)
 	(not (up-research-status c: castle-age c:>= research-pending))
 =>
-	(set-strategic-number sn-food-gatherer-percentage 47)
+	(set-strategic-number sn-food-gatherer-percentage 50)
 	(set-strategic-number sn-wood-gatherer-percentage 40)
-	(set-strategic-number sn-gold-gatherer-percentage 10)
+	(set-strategic-number sn-gold-gatherer-percentage 7)
 	(set-strategic-number sn-stone-gatherer-percentage 3)
 )
 
@@ -318,7 +341,7 @@
 ; barracks/stable win the wood first), unless wood is plentiful.
 (defrule
 	(current-age >= feudal-age)
-	(or (building-type-count-total stable > 0) (wood-amount > 250))
+	(or (building-type-count-total stable > 0) (wood-amount > 180))
 	(idle-farm-count < 1)
 	(can-build farm)
 	(up-pending-objects c: farm < 2)
@@ -526,17 +549,7 @@
 	(chat-to-player my-player-number "[MASTER] Clicking FEUDAL")
 )
 
-; DIAGNOSTIC: 500 food in Dark Age but still can't click -> building prerequisite.
-; Report once so we know exactly what's blocking the age-up.
-(defrule
-	(goal gl-debug on)
-	(current-age == dark-age)
-	(food-amount >= 500)
-	(not (can-research feudal-age))
-=>
-	(chat-to-player my-player-number "[MASTER] 500 food but cannot click Feudal (building prereq?)")
-	(disable-self)
-)
+; (Feudal-prereq diagnostic removed in v0.5 — age-up is reliable now.)
 
 (defrule
 	(can-research-with-escrow castle-age)
