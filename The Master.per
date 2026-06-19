@@ -1,10 +1,14 @@
 ;==================================================================================
-; THE MASTER - v0.3
+; THE MASTER - v0.4
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Game plan : Scouts -> Knights -> Paladins, with reactive counters.
 ; Scope     : 1v1, Arabia, vs a random-civ DE AI (target: Hardest).
 ; Author    : interlepus@yahoo.com
 ;
+; v0.4: Feudal eco rebalance (more wood, far less gold) + build-priority fixes so
+;       barracks->stable->scouts arrive on time (farms/blacksmith were eating the wood
+;       before the barracks could afford 175). Barracks now goes up DURING the Feudal
+;       click; blacksmith/farms wait for the stable; boar held until ~8 vils.
 ; v0.3: fix AoE2 binary-operator syntax (or/and/nand take exactly 2 args) that broke
 ;       v0.2 loading at the villager rule; make the Feudal click win the food race vs
 ;       villager production; add a "cannot click Feudal" diagnostic line.
@@ -30,7 +34,7 @@
 (defrule
 	(game-time > 4)
 =>
-	(chat-to-all "The Master v0.3 -- Meistar. GL HF!")
+	(chat-to-all "The Master v0.4 -- Meistar. GL HF!")
 	(disable-self)
 )
 ;endregion
@@ -96,13 +100,13 @@
 	(set-strategic-number sn-total-number-explorers 1)
 	(set-strategic-number sn-percent-civilian-explorers 0)
 	(set-strategic-number sn-cap-civilian-explorers 0)
-	(set-strategic-number sn-home-exploration-time 240)   ; <-- find sheep/boar/berries/gold/stone first
+	(set-strategic-number sn-home-exploration-time 300)   ; <-- find sheep/boar/berries/gold/stone first
 
 	; --- gathering / dropsites (keep villager walk distance short) ---
 	(set-strategic-number sn-intelligent-gathering 1)
 	(set-strategic-number sn-livestock-to-town-center 1)
-	(set-strategic-number sn-enable-boar-hunting 1)
-	(set-strategic-number sn-minimum-number-hunters 4)
+	(set-strategic-number sn-enable-boar-hunting 0)
+	(set-strategic-number sn-minimum-number-hunters 5)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1)
 	(set-strategic-number sn-maximum-hunt-drop-distance 24)
 	(set-strategic-number sn-maximum-food-drop-distance 24)
@@ -142,6 +146,18 @@
 	(disable-self)
 )
 ; (1v1: only one enemy, so the default target player is fine — no focus rule needed.)
+;endregion
+
+;region BOAR TIMING ================================================================
+; Hold boar until ~8 vils (first 6 on sheep). With <6 vils boar dies too slowly and
+; the long carry delays TC drop-off.
+(defrule
+	(current-age == dark-age)
+	(civilian-population >= 8)
+	(strategic-number sn-enable-boar-hunting != 1)
+=>
+	(set-strategic-number sn-enable-boar-hunting 1)
+)
 ;endregion
 
 ;region ECONOMY: VILLAGER PRODUCTION ==============================================
@@ -245,10 +261,10 @@
 	(current-age == feudal-age)
 	(not (up-research-status c: castle-age c:>= research-pending))
 =>
-	(set-strategic-number sn-food-gatherer-percentage 50)
-	(set-strategic-number sn-wood-gatherer-percentage 30)
-	(set-strategic-number sn-gold-gatherer-percentage 18)
-	(set-strategic-number sn-stone-gatherer-percentage 2)
+	(set-strategic-number sn-food-gatherer-percentage 47)
+	(set-strategic-number sn-wood-gatherer-percentage 40)
+	(set-strategic-number sn-gold-gatherer-percentage 10)
+	(set-strategic-number sn-stone-gatherer-percentage 3)
 )
 
 ; Castle Age: KNIGHT economy = heavy food + gold, wood for TCs/farms, trickle stone.
@@ -298,12 +314,15 @@
 	(build farm)
 )
 
+; Feudal+ farms — but DON'T spend wood on farms until the Stable is up (so the
+; barracks/stable win the wood first), unless wood is plentiful.
 (defrule
 	(current-age >= feudal-age)
-	(idle-farm-count < 2)
+	(or (building-type-count-total stable > 0) (wood-amount > 250))
+	(idle-farm-count < 1)
 	(can-build farm)
-	(up-pending-objects c: farm < 3)
-	(wood-amount > 80)
+	(up-pending-objects c: farm < 2)
+	(wood-amount > 100)
 =>
 	(build farm)
 )
@@ -375,8 +394,9 @@
 ;endregion
 
 ;region BUILDINGS: MILITARY & TECH ================================================
+; Barracks ASAP — built DURING the Feudal click so the Stable can follow instantly.
 (defrule
-	(current-age >= feudal-age)
+	(or (up-research-status c: feudal-age c:>= research-pending) (current-age >= feudal-age))
 	(building-type-count-total barracks < 1)
 	(can-build barracks)
 	(up-pending-objects c: barracks < 1)
@@ -403,8 +423,10 @@
 	(build stable)
 )
 
+; Blacksmith only AFTER the stable (scouts come before upgrades).
 (defrule
 	(current-age >= feudal-age)
+	(building-type-count-total stable > 0)
 	(building-type-count-total blacksmith < 1)
 	(can-build-with-escrow blacksmith)
 	(up-pending-objects c: blacksmith < 1)
