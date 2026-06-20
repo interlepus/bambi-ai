@@ -1,59 +1,48 @@
 ;==================================================================================
-; THE MASTER - v0.8
+; THE MASTER - v0.9
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
-; Game plan : Scouts -> Knights -> Paladins, Feudal fork (Scrush vs Fast Castle).
+; Game plan : Scouts/FC -> Knights (+ Throwing Axemen vs spears) -> Paladins.
 ; Scope     : 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
 ;
-; v0.8: ESCROW REMOVED — it was locking wood/food in a reserved pool that plain
-;       (build)/(research) can't spend, delaying Stable/Blacksmith/Scouts and piling
-;       wood. Everything now draws from one pool; rule-order keeps villagers first.
-;       + wheelbarrow at end-of-Feudal/Castle (skip if enemy in Castle), handcart at
-;       2 TCs / 60 vils, age-scaled housing (more houses per age), boar with 6 hunters.
-;       Franks notes: farm upgrades are FREE; archers are weak (no Arbalest/Bracer);
-;       castles are 25% cheaper; cavalry +20% HP.
+; v0.9 — two mechanism fixes + Franks identity:
+;  * AGE-UP UNBLOCKED: a TC does ONE thing at a time, so continuous villager production
+;    was blocking Castle/Imperial research (sat on 1300f/900g). gl-clickable now pauses
+;    villager production the instant ANY next age is affordable, so the age-up gets the TC.
+;  * BOAR LURE: lure with 1 villager so the boar walks to the TC, swarm with 6 only when
+;    it's <=13 tiles away (Bambi's method) — it was dying out in the field.
+;  * Feudal gold cut to ~1 vil (no gold units pre-Castle); Throwing Axemen vs spears
+;    (Franks UU, protects knights); skirms + padded armour + Fletching as archer defence;
+;    archery range early when threatened; market deferred to Castle; LC at 8 vils; wood
+;    capped ~8 in Dark Age.
+;  Franks notes: free farm upgrades; weak archers (no Arbalest/Bracer) -> defend with
+;    SKIRMS, not archers; cheaper castles; cav +20% HP; Chivalry (faster cav).
 ;
 ; NOTE TO SELF: AoE2 and/or/nand are BINARY (exactly 2 args) — nest, never list 3+.
 ; >>> DEBUG: flip gl-debug to "off" at the rule marked [DEBUG TOGGLE] to silence.
 ;==================================================================================
 
 ;region IDENTITY & GREETING ========================================================
-(defrule
-	(true)
-=>
-	(up-change-name "Meistar")
-	(disable-self)
-)
-
-(defrule
-	(game-time > 4)
-=>
-	(chat-to-all "The Master v0.8 -- Meistar. GL HF!")
-	(disable-self)
-)
+(defrule (true) => (up-change-name "Meistar") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v0.9 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
 (defconst on 1)
 (defconst off 0)
-(defconst with-escrow 0)
 
 (defconst research-pending 2)
 (defconst research-complete 3)
 
-(defconst stance-aggressive 0)
-(defconst stance-defensive 1)
-(defconst stance-stand-ground 2)
-(defconst stance-no-attack 3)
-
 ; goals
 (defconst gl-debug 1)
-(defconst gl-escrow-state 2)
 (defconst gl-my-army 3)
 (defconst gl-enemy-anti-cav 4)
 (defconst gl-enemy-ranged 5)
 (defconst gl-attack 6)
 (defconst gl-town-size-step 7)
 (defconst gl-plan 8)               ; 0 undecided, 1 = scout rush, 2 = fast castle
+(defconst gl-clickable 9)          ; 1 = a next age is affordable now -> pause vils
+(defconst gl-boar-state 10)        ; 0 idle, 1 luring with 1, 2 swarming with 6
 
 ; timers
 (defconst timer-debug 1)
@@ -65,21 +54,17 @@
 	(true)
 =>
 	(set-goal gl-debug on)
-	(set-goal gl-escrow-state with-escrow)
 	(set-goal gl-attack off)
 	(set-goal gl-enemy-anti-cav off)
 	(set-goal gl-enemy-ranged off)
 	(set-goal gl-town-size-step 0)
 	(set-goal gl-plan 0)
+	(set-goal gl-clickable off)
+	(set-goal gl-boar-state 0)
 	(disable-self)
 )
 
-(defrule
-	(true)
-=>
-	(enable-timer timer-debug 20)
-	(disable-self)
-)
+(defrule (true) => (enable-timer timer-debug 20) (disable-self))
 ;endregion
 
 ;region INITIAL STRATEGIC NUMBERS ==================================================
@@ -97,8 +82,8 @@
 	(set-strategic-number sn-livestock-to-town-center 1)
 	(set-strategic-number sn-enable-boar-hunting 0)
 	(set-strategic-number sn-minimum-number-hunters 0)
-	(set-strategic-number sn-minimum-boar-lure-group-size 1000)   ; boar BLOCKED until ~14 vils
-	(set-strategic-number sn-maximum-hunt-drop-distance 24)
+	(set-strategic-number sn-minimum-boar-lure-group-size 1000)   ; boar BLOCKED until the lure starts
+	(set-strategic-number sn-maximum-hunt-drop-distance 28)
 	(set-strategic-number sn-maximum-food-drop-distance 24)
 	(set-strategic-number sn-maximum-gold-drop-distance 30)
 	(set-strategic-number sn-maximum-stone-drop-distance 30)
@@ -123,19 +108,41 @@
 	(set-strategic-number sn-number-attack-groups 0)
 	(set-strategic-number sn-consecutive-idle-unit-limit 1)
 	(set-strategic-number sn-enable-offensive-priority 1)
-
 	(set-strategic-number sn-maximum-town-size 18)
 	(set-strategic-number sn-enemy-sighted-response-distance 30)
 	(set-strategic-number sn-wall-targeting-mode 1)
-
 	(set-strategic-number sn-allow-civilian-defense 1)
 	(set-strategic-number sn-number-civilian-militia 0)
 	(disable-self)
 )
 ;endregion
 
+;region AGE-UP CONTROL (free the TC so the age-up isn't blocked by villagers) ======
+; A TC can only do ONE thing at a time. gl-clickable goes ON the instant the next age
+; is affordable, which pauses villager production below so the age-up rule gets the TC.
+(defrule
+	(or
+		(and (current-age == dark-age) (can-research feudal-age))
+		(or
+			(and (current-age == feudal-age) (can-research castle-age))
+			(and (current-age == castle-age) (and (can-research imperial-age) (and (military-population >= 12) (civilian-population >= 45))))
+		)
+	)
+=>
+	(set-goal gl-clickable on)
+)
+
+(defrule
+	(goal gl-clickable on)
+	(not (and (current-age == dark-age) (can-research feudal-age)))
+	(not (and (current-age == feudal-age) (can-research castle-age)))
+	(not (and (current-age == castle-age) (and (can-research imperial-age) (and (military-population >= 12) (civilian-population >= 45)))))
+=>
+	(set-goal gl-clickable off)
+)
+;endregion
+
 ;region ANTI-IDLE: KEEP THE TC FED ================================================
-; Force food-gatherers to deposit their load when food drops below a villager's cost.
 (defrule
 	(current-age <= feudal-age)
 	(food-amount < 50)
@@ -144,44 +151,60 @@
 )
 ;endregion
 
-;region BOAR TIMING ================================================================
-; Take boar at ~14 vils with 6 hunters (4 was iffy — the boar fights back and we don't
-; want to lose a villager). ~6+ stay on food. Boar blocked via lure-group-size 1000.
-(defrule
-	(current-age == dark-age)
-	(civilian-population >= 14)
-	(strategic-number sn-minimum-boar-lure-group-size != 1)
-=>
-	(set-strategic-number sn-enable-boar-hunting 1)
-	(set-strategic-number sn-minimum-number-hunters 6)
-	(set-strategic-number sn-minimum-boar-lure-group-size 1)
-	(chat-to-player my-player-number "[MASTER] Boar on (~14 vils, 6 hunters)")
-)
-;endregion
-
-;region ECONOMY: VILLAGER PRODUCTION (always first -> never out-prioritised) =======
-; The TC pumps villagers; it only pauses the instant Feudal is clickable so the age-up
-; wins the food. This rule sits ABOVE all military/tech, so villagers always get the
-; TC slot before anything else spends.
+;region ECONOMY: VILLAGER PRODUCTION (paused only while an age-up is waiting) =======
 (defrule
 	(can-train villager)
 	(civilian-population < 95)
 	(population-headroom > 0)
 	(housing-headroom > 0)
-	(nand
-		(current-age == dark-age)
-		(and
-			(not (up-research-status c: feudal-age c:>= research-pending))
-			(can-research feudal-age)
-		)
-	)
+	(goal gl-clickable off)
 =>
 	(train villager)
 )
 ;endregion
 
+;region BOAR LURE (1 lurer -> boar walks to TC -> 6 hunters) =======================
+; Lure with a single villager so the boar follows it home; only swarm with 6 once it's
+; right at the drop-off (<=13 tiles), so the carry walk is tiny.
+(defrule
+	(current-age == dark-age)
+	(civilian-population >= 14)
+	(goal gl-boar-state 0)
+	(dropsite-min-distance live-boar > -1)
+	(dropsite-min-distance live-boar s:<= sn-maximum-hunt-drop-distance)
+=>
+	(set-strategic-number sn-enable-boar-hunting 2)
+	(set-strategic-number sn-minimum-number-hunters 1)
+	(set-strategic-number sn-minimum-boar-lure-group-size 1)
+	(set-goal gl-boar-state 1)
+	(chat-to-player my-player-number "[MASTER] Luring boar with 1 villager")
+)
+
+(defrule
+	(goal gl-boar-state 1)
+	(dropsite-min-distance live-boar > -1)
+	(dropsite-min-distance live-boar <= 13)
+=>
+	(set-strategic-number sn-minimum-number-hunters 6)
+	(set-strategic-number sn-minimum-boar-hunt-group-size 6)
+	(set-goal gl-boar-state 2)
+	(chat-to-player my-player-number "[MASTER] Boar at the TC -> 6 hunters")
+)
+
+(defrule
+	(goal gl-boar-state 2)
+	(or (up-remaining-boar-amount < 180) (dropsite-min-distance live-boar == -1))
+=>
+	(set-strategic-number sn-enable-boar-hunting 1)
+	(set-strategic-number sn-minimum-number-hunters 0)
+	(set-strategic-number sn-minimum-boar-hunt-group-size 0)
+	(set-strategic-number sn-minimum-boar-lure-group-size 1000)
+	(set-goal gl-boar-state 0)
+)
+;endregion
+
 ;region ECONOMY: GATHER DISTRIBUTION ==============================================
-; Dark Age = FOOD-FIRST. First ~6 vils on sheep, then phase wood in.
+; Dark Age = FOOD-FIRST; first ~6 on sheep, then ~max 8 on wood (the rest stay on food).
 (defrule
 	(current-age == dark-age)
 	(not (up-research-status c: feudal-age c:>= research-pending))
@@ -199,8 +222,8 @@
 	(civilian-population >= 7)
 	(civilian-population <= 10)
 =>
-	(set-strategic-number sn-food-gatherer-percentage 68)
-	(set-strategic-number sn-wood-gatherer-percentage 32)
+	(set-strategic-number sn-food-gatherer-percentage 70)
+	(set-strategic-number sn-wood-gatherer-percentage 30)
 	(set-strategic-number sn-gold-gatherer-percentage 0)
 	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
@@ -210,13 +233,12 @@
 	(not (up-research-status c: feudal-age c:>= research-pending))
 	(civilian-population >= 11)
 =>
-	(set-strategic-number sn-food-gatherer-percentage 58)
-	(set-strategic-number sn-wood-gatherer-percentage 42)
+	(set-strategic-number sn-food-gatherer-percentage 62)
+	(set-strategic-number sn-wood-gatherer-percentage 38)
 	(set-strategic-number sn-gold-gatherer-percentage 0)
 	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
 
-; SAFETY NET: enough vils but still under 500 food -> slam food to bank & click up.
 (defrule
 	(current-age == dark-age)
 	(not (up-research-status c: feudal-age c:>= research-pending))
@@ -229,38 +251,38 @@
 	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
 
-; Clicking up to Feudal: at most ~2 vils on gold for the Feudal blacksmith/stable.
+; Clicking up to Feudal: ~1 vil on gold for the Feudal blacksmith.
 (defrule
 	(up-research-status c: feudal-age c:>= research-pending)
 	(current-age == dark-age)
 =>
-	(set-strategic-number sn-food-gatherer-percentage 50)
+	(set-strategic-number sn-food-gatherer-percentage 52)
 	(set-strategic-number sn-wood-gatherer-percentage 43)
-	(set-strategic-number sn-gold-gatherer-percentage 7)
+	(set-strategic-number sn-gold-gatherer-percentage 5)
 	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
 
-; FEUDAL - SCOUT RUSH: wood for buildings/scouts, low gold, no stone yet.
+; FEUDAL - SCOUT RUSH: wood for buildings/scouts, almost no gold (scouts cost food).
 (defrule
 	(current-age == feudal-age)
 	(goal gl-plan 1)
 	(not (up-research-status c: castle-age c:>= research-pending))
 =>
-	(set-strategic-number sn-food-gatherer-percentage 51)
+	(set-strategic-number sn-food-gatherer-percentage 53)
 	(set-strategic-number sn-wood-gatherer-percentage 42)
-	(set-strategic-number sn-gold-gatherer-percentage 7)
+	(set-strategic-number sn-gold-gatherer-percentage 5)
 	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
 
-; FEUDAL - FAST CASTLE: bank food + gold to reach Castle fast; minimal wood/stone.
+; FEUDAL - FAST CASTLE: bank food hard for the 800; just enough gold for the 200.
 (defrule
 	(current-age == feudal-age)
 	(goal gl-plan 2)
 	(not (up-research-status c: castle-age c:>= research-pending))
 =>
-	(set-strategic-number sn-food-gatherer-percentage 55)
-	(set-strategic-number sn-wood-gatherer-percentage 30)
-	(set-strategic-number sn-gold-gatherer-percentage 15)
+	(set-strategic-number sn-food-gatherer-percentage 63)
+	(set-strategic-number sn-wood-gatherer-percentage 25)
+	(set-strategic-number sn-gold-gatherer-percentage 12)
 	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
 
@@ -274,7 +296,6 @@
 	(set-strategic-number sn-stone-gatherer-percentage 7)
 )
 
-; Imperial Age: Paladin + siege; keep gold high.
 (defrule
 	(current-age == imperial-age)
 	(gold-amount < 700)
@@ -305,7 +326,6 @@
 	(up-modify-sn sn-food-gatherer-percentage c:+ 8)
 	(up-modify-sn sn-gold-gatherer-percentage c:+ 4)
 )
-
 (defrule
 	(gold-amount > 900)
 	(strategic-number sn-gold-gatherer-percentage > 6)
@@ -314,7 +334,6 @@
 	(up-modify-sn sn-food-gatherer-percentage c:+ 4)
 	(up-modify-sn sn-wood-gatherer-percentage c:+ 2)
 )
-
 (defrule
 	(current-age >= castle-age)
 	(food-amount > 1300)
@@ -325,10 +344,7 @@
 )
 ;endregion
 
-;region ECONOMY: FARMS =============================================================
-; Franks get farm upgrades FREE, so farms are extra efficient. Sheep/boar/berries carry
-; Dark Age; add farms once we have a mill + ~16 vils, and from Feudal on (but not before
-; the Stable, so military buildings win the wood).
+;region ECONOMY: FARMS (Franks get farm upgrades free) ============================
 (defrule
 	(current-age == dark-age)
 	(civilian-population >= 16)
@@ -340,7 +356,6 @@
 =>
 	(build farm)
 )
-
 (defrule
 	(current-age >= feudal-age)
 	(or (building-type-count-total stable > 0) (wood-amount > 180))
@@ -354,7 +369,6 @@
 ;endregion
 
 ;region BUILDINGS: HOUSES & DROPSITES =============================================
-; First house with 2 builders so we're not pop-blocked at 5; then 1 builder per house.
 (defrule
 	(building-type-count town-center > 0)
 	(building-type-count-total house == 0)
@@ -364,117 +378,88 @@
 	(up-assign-builders c: house c: 2)
 	(build house)
 )
-
 (defrule
 	(building-type-count-total house > 0)
 =>
 	(up-assign-builders c: house c: 1)
 	(disable-self)
 )
-
-; Build MORE houses at once as we age up (more buildings produce simultaneously).
+; More houses at once as we age up (more buildings produce simultaneously).
 (defrule
 	(current-age <= feudal-age)
 	(housing-headroom < 6)
 	(population-headroom > 0)
 	(up-pending-objects c: house < 2)
 	(can-build house)
-=>
-	(build house)
-)
-
+=> (build house))
 (defrule
 	(current-age == castle-age)
 	(housing-headroom < 12)
 	(population-headroom > 0)
 	(up-pending-objects c: house < 3)
 	(can-build house)
-=>
-	(build house)
-)
-
+=> (build house))
 (defrule
 	(current-age == imperial-age)
 	(housing-headroom < 18)
 	(population-headroom > 0)
 	(up-pending-objects c: house < 5)
 	(can-build house)
-=>
-	(build house)
-)
+=> (build house))
 
-; First lumber camp at ~7 vils (after the opening 6 stay on food), before mill/farms.
+; First lumber camp at ~8 vils (keep the opening on food a touch longer).
 (defrule
 	(building-type-count-total lumber-camp < 1)
-	(civilian-population >= 7)
+	(civilian-population >= 8)
 	(can-build lumber-camp)
 	(up-pending-objects c: lumber-camp < 1)
-=>
-	(build lumber-camp)
-)
-
+=> (build lumber-camp))
 (defrule
 	(building-type-count-total lumber-camp >= 1)
 	(dropsite-min-distance wood > 4)
 	(up-pending-objects c: lumber-camp < 1)
 	(can-build lumber-camp)
-=>
-	(build lumber-camp)
-)
+=> (build lumber-camp))
 
-; Mill after the lumber camp, near the forage the scout found.
 (defrule
 	(building-type-count-total mill == 0)
 	(building-type-count-total lumber-camp > 0)
-	(civilian-population >= 8)
+	(civilian-population >= 9)
 	(can-build mill)
 	(up-pending-objects c: mill < 1)
-=>
-	(build mill)
-)
+=> (build mill))
 
-; Gold mining camp once we need gold (clicking Feudal onward).
 (defrule
 	(or (up-research-status c: feudal-age c:>= research-pending) (current-age >= feudal-age))
 	(dropsite-min-distance gold > 5)
 	(resource-found gold)
 	(up-pending-objects c: mining-camp < 1)
 	(can-build mining-camp)
-=>
-	(build mining-camp)
-)
+=> (build mining-camp))
 
-; Stone mining camp delayed to Castle Age (no towers planned in v1).
 (defrule
 	(or (current-age >= castle-age) (up-research-status c: castle-age c:>= research-pending))
 	(dropsite-min-distance stone > 5)
 	(resource-found stone)
 	(up-pending-objects c: mining-camp < 1)
 	(can-build mining-camp)
-=>
-	(build mining-camp)
-)
+=> (build mining-camp))
 ;endregion
 
 ;region BUILDINGS: MILITARY & TECH ================================================
-; Barracks ASAP — built DURING the Feudal click so the Stable can follow instantly.
 (defrule
 	(or (up-research-status c: feudal-age c:>= research-pending) (current-age >= feudal-age))
 	(building-type-count-total barracks < 1)
 	(can-build barracks)
 	(up-pending-objects c: barracks < 1)
-=>
-	(build barracks)
-)
+=> (build barracks))
 
 (defrule
 	(current-age >= feudal-age)
 	(building-type-count-total stable < 1)
 	(can-build stable)
 	(up-pending-objects c: stable < 1)
-=>
-	(build stable)
-)
+=> (build stable))
 
 (defrule
 	(current-age >= castle-age)
@@ -482,40 +467,33 @@
 	(can-build stable)
 	(up-pending-objects c: stable < 1)
 	(wood-amount > 175)
-=>
-	(build stable)
-)
+=> (build stable))
 
-; Blacksmith after the Stable (cavalry before upgrades).
 (defrule
 	(current-age >= feudal-age)
 	(building-type-count-total stable > 0)
 	(building-type-count-total blacksmith < 1)
 	(can-build blacksmith)
 	(up-pending-objects c: blacksmith < 1)
-=>
-	(build blacksmith)
-)
+=> (build blacksmith))
 
+; Archery Range EARLY when a ranged threat shows or we're attacked (skirms vs archers).
 (defrule
-	(or (goal gl-enemy-anti-cav on) (goal gl-enemy-ranged on))
+	(or (goal gl-enemy-ranged on) (town-under-attack))
 	(current-age >= feudal-age)
 	(building-type-count-total archery-range < 1)
 	(can-build archery-range)
 	(up-pending-objects c: archery-range < 1)
-=>
-	(build archery-range)
-)
+=> (build archery-range))
 
+; Market deferred to Castle (only needed there for buying stone) — no wasted Feudal wood.
 (defrule
-	(current-age >= feudal-age)
+	(current-age >= castle-age)
 	(building-type-count-total market < 1)
 	(can-build market)
 	(up-pending-objects c: market < 1)
 	(wood-amount > 175)
-=>
-	(build market)
-)
+=> (build market))
 
 (defrule
 	(current-age >= castle-age)
@@ -523,9 +501,7 @@
 	(can-build university)
 	(up-pending-objects c: university < 1)
 	(wood-amount > 200)
-=>
-	(build university)
-)
+=> (build university))
 
 (defrule
 	(current-age >= castle-age)
@@ -533,18 +509,14 @@
 	(can-build siege-workshop)
 	(up-pending-objects c: siege-workshop < 1)
 	(military-population > 8)
-=>
-	(build siege-workshop)
-)
+=> (build siege-workshop))
 
 (defrule
 	(current-age >= castle-age)
 	(building-type-count-total castle < 1)
 	(can-build castle)
 	(up-pending-objects c: castle < 1)
-=>
-	(build castle)
-)
+=> (build castle))
 ;endregion
 
 ;region BUILDINGS: TOWN CENTERS (BOOM) ============================================
@@ -561,28 +533,20 @@
 )
 ;endregion
 
-;region AGES (no escrow — one resource pool) ======================================
-; Feudal: click at ~21 vils (eco rules bank the 500 food), or react to enemy advancing.
+;region AGES (no escrow; villagers paused by gl-clickable so these get the TC) =====
 (defrule
-	(or
-		(civilian-population >= 21)
-		(players-current-age any-enemy >= feudal-age)
-	)
+	(or (civilian-population >= 21) (players-current-age any-enemy >= feudal-age))
 	(can-research feudal-age)
 =>
 	(research feudal-age)
 	(chat-to-player my-player-number "[MASTER] Clicking FEUDAL")
 )
-
-; Castle: as soon as 800 food + 200 gold are banked.
 (defrule
 	(can-research castle-age)
 =>
 	(research castle-age)
 	(chat-to-player my-player-number "[MASTER] Clicking CASTLE")
 )
-
-; Imperial: with a real Castle-Age army + economy behind it.
 (defrule
 	(can-research imperial-age)
 	(military-population >= 12)
@@ -602,7 +566,6 @@
 	(set-goal gl-plan 1)
 	(chat-to-player my-player-number "[MASTER] Plan: SCOUT RUSH (we hit Feudal first)")
 )
-
 (defrule
 	(current-age == feudal-age)
 	(goal gl-plan 0)
@@ -614,7 +577,6 @@
 ;endregion
 
 ;region RESEARCH: ECONOMY ==========================================================
-; Loom: ~20 pop (before Feudal), or TC would idle (food<45), or ANY enemy unit in town.
 (defrule
 	(or (food-amount < 45) (or (civilian-population >= 20) (or (town-under-attack) (up-enemy-units-in-town > 0))))
 	(can-research ri-loom)
@@ -623,33 +585,27 @@
 	(chat-to-player my-player-number "[MASTER] Loom")
 )
 
-; (Franks get Horse Collar / Heavy Plow / Crop Rotation FREE — these just won't fire.)
 (defrule (can-research ri-double-bit-axe) => (research ri-double-bit-axe))
-(defrule (can-research ri-horse-collar)   => (research ri-horse-collar))
+(defrule (can-research ri-horse-collar)   => (research ri-horse-collar))   ; (free for Franks)
 (defrule (can-research ri-bow-saw)        => (research ri-bow-saw))
-(defrule (can-research ri-heavy-plow)     => (research ri-heavy-plow))
+(defrule (can-research ri-heavy-plow)     => (research ri-heavy-plow))     ; (free for Franks)
 
-; Wheelbarrow at end-of-Feudal / Castle — SKIP if an enemy is already in Castle.
+; Wheelbarrow at end-Feudal / Castle — SKIP if an enemy is already in Castle.
 (defrule
 	(or (current-age >= castle-age) (up-research-status c: castle-age c:>= research-pending))
 	(not (players-current-age any-enemy >= castle-age))
 	(can-research ri-wheel-barrow)
-=>
-	(research ri-wheel-barrow)
-)
+=> (research ri-wheel-barrow))
 
-; Hand cart once we're booming: 2+ TCs or 60+ villagers.
+; Hand cart once booming: 2+ TCs or 60+ villagers.
 (defrule
 	(or (building-type-count-total town-center >= 2) (civilian-population > 60))
 	(can-research ri-hand-cart)
-=>
-	(research ri-hand-cart)
-)
+=> (research ri-hand-cart))
 
 ; Gold-mining techs delayed to Castle Age.
 (defrule (or (current-age >= castle-age) (up-research-status c: castle-age c:>= research-pending)) (can-research ri-gold-mining) => (research ri-gold-mining))
 (defrule (current-age >= castle-age) (can-research ri-gold-shaft-mining) => (research ri-gold-shaft-mining))
-
 (defrule (current-age >= imperial-age)(can-research ri-two-man-saw)       => (research ri-two-man-saw))
 (defrule (current-age >= imperial-age)(can-research ri-stone-mining)      => (research ri-stone-mining))
 (defrule (current-age >= imperial-age)(can-research ri-stone-shaft-mining)=> (research ri-stone-shaft-mining))
@@ -664,21 +620,67 @@
 (defrule (or (unit-type-count-total scout-cavalry-line > 1) (unit-type-count-total knight-line > 1)) (can-research ri-scale-barding) => (research ri-scale-barding))
 (defrule (research-completed ri-scale-barding)(can-research ri-chain-barding) => (research ri-chain-barding))
 (defrule (research-completed ri-chain-barding)(can-research ri-plate-barding) => (research ri-plate-barding))
-
 (defrule (can-research ri-cavalier) => (research ri-cavalier))
 (defrule (can-research ri-paladin)  => (research ri-paladin))
 (defrule (can-research ri-chivalry) => (research ri-chivalry))
 ;endregion
 
-;region RESEARCH: DEFENSIVE / UNIVERSITY ==========================================
-; Fletching ASAP when attacked — stronger/longer TC & tower arrows.
+;region DEFENCE: detect threats & react ===========================================
+; Anti-cav threat (enemy spears/pikes/camels) -> Throwing Axemen (Franks' answer).
 (defrule
-	(town-under-attack)
-	(can-research ri-fletching)
-=>
-	(research ri-fletching)
-)
+	(or (players-unit-type-count any-enemy spearman-line >= 5) (players-unit-type-count any-enemy camel-line >= 4))
+	(goal gl-enemy-anti-cav off)
+=> (set-goal gl-enemy-anti-cav on))
+(defrule
+	(players-unit-type-count any-enemy spearman-line < 3)
+	(players-unit-type-count any-enemy camel-line < 2)
+	(goal gl-enemy-anti-cav on)
+=> (set-goal gl-enemy-anti-cav off))
 
+; Ranged threat EARLY (4+ archers/skirms) or being attacked -> skirmisher defence.
+(defrule
+	(or
+		(or (players-unit-type-count any-enemy archer-line >= 4) (players-unit-type-count any-enemy skirmisher-line >= 4))
+		(town-under-attack)
+	)
+	(goal gl-enemy-ranged off)
+=> (set-goal gl-enemy-ranged on))
+
+; Throwing Axemen vs spears (need a Castle) — they shield the Knights.
+(defrule
+	(goal gl-enemy-anti-cav on)
+	(building-type-count castle > 0)
+	(can-train throwing-axeman-line)
+	(unit-type-count-total throwing-axeman-line < 12)
+=> (train throwing-axeman-line))
+(defrule (can-research ri-elite-throwing-axeman) (unit-type-count-total throwing-axeman-line > 0) => (research ri-elite-throwing-axeman))
+
+; Skirmishers = the expert vs archers (Franks' archers are too weak to bother).
+(defrule
+	(goal gl-enemy-ranged on)
+	(building-type-count archery-range > 0)
+	(can-train skirmisher-line)
+	(unit-type-count-total skirmisher-line < 12)
+=> (train skirmisher-line))
+(defrule (goal gl-enemy-ranged on)(can-research ri-elite-skirmisher) => (research ri-elite-skirmisher))
+(defrule (goal gl-enemy-ranged on)(can-research ri-padded-archer-armor) => (research ri-padded-archer-armor))
+(defrule (goal gl-enemy-ranged on)(can-research ri-leather-archer-armor) => (research ri-leather-archer-armor))
+
+; Defensive scouts when attacked (fast, good vs archers) — any plan.
+(defrule
+	(current-age == feudal-age)
+	(town-under-attack)
+	(food-amount > 80)
+	(can-train scout-cavalry-line)
+	(unit-type-count-total scout-cavalry-line < 5)
+=> (train scout-cavalry-line))
+
+; Fletching ASAP when attacked — stronger/longer TC & tower arrows.
+(defrule (town-under-attack)(can-research ri-fletching) => (research ri-fletching))
+(defrule (goal gl-enemy-ranged on)(can-research ri-bodkin-arrow) => (research ri-bodkin-arrow))
+;endregion
+
+;region RESEARCH: DEFENSIVE / UNIVERSITY ==========================================
 (defrule (can-research ri-masonry)        => (research ri-masonry))
 (defrule (can-research ri-murder-holes)   => (research ri-murder-holes))
 (defrule (can-research ri-ballistics)     => (research ri-ballistics))
@@ -693,73 +695,33 @@
 	(can-train scout-cavalry-line)
 	(unit-type-count-total scout-cavalry-line < 6)
 	(not (up-research-status c: castle-age c:>= research-pending))
-=>
-	(train scout-cavalry-line)
-)
-
+=> (train scout-cavalry-line))
 (defrule
 	(current-age == feudal-age)
 	(goal gl-plan 2)
-	(food-amount > 80)
+	(food-amount > 90)
 	(can-train scout-cavalry-line)
 	(unit-type-count-total scout-cavalry-line < 1)
-=>
-	(train scout-cavalry-line)
-)
+=> (train scout-cavalry-line))
 ;endregion
 
 ;region MILITARY: KNIGHTS (the core) ==============================================
 (defrule
 	(current-age >= castle-age)
 	(can-train knight-line)
-=>
-	(train knight-line)
-)
+=> (train knight-line))
 ;endregion
 
-;region MILITARY: ENEMY ASSESSMENT (for counters) =================================
-(defrule
-	(or
-		(players-unit-type-count any-enemy spearman-line >= 6)
-		(players-unit-type-count any-enemy camel-line >= 5)
-	)
-	(goal gl-enemy-anti-cav off)
-=>
-	(set-goal gl-enemy-anti-cav on)
-)
-
-(defrule
-	(players-unit-type-count any-enemy spearman-line < 3)
-	(players-unit-type-count any-enemy camel-line < 2)
-	(goal gl-enemy-anti-cav on)
-=>
-	(set-goal gl-enemy-anti-cav off)
-)
-
-(defrule
-	(or
-		(players-unit-type-count any-enemy archer-line >= 8)
-		(players-unit-type-count any-enemy skirmisher-line >= 8)
-	)
-	(goal gl-enemy-ranged off)
-=>
-	(set-goal gl-enemy-ranged on)
-)
-;endregion
-
-;region MILITARY: COUNTERS =========================================================
+;region MILITARY: COUNTERS (anti-cav crossbow fallback; ranged mangonels) =========
 (defrule
 	(goal gl-enemy-anti-cav on)
 	(current-age >= feudal-age)
 	(building-type-count archery-range > 0)
+	(building-type-count castle == 0)
 	(can-train archer-line)
-	(unit-type-count-total archer-line < 14)
-=>
-	(train archer-line)
-)
+	(unit-type-count-total archer-line < 10)
+=> (train archer-line))
 (defrule (can-research ri-crossbow) (goal gl-enemy-anti-cav on) => (research ri-crossbow))
-(defrule (can-research ri-arbalest) (goal gl-enemy-anti-cav on) => (research ri-arbalest))
-(defrule (can-research ri-bodkin-arrow)(goal gl-enemy-anti-cav on) => (research ri-bodkin-arrow))
 
 (defrule
 	(goal gl-enemy-ranged on)
@@ -767,17 +729,7 @@
 	(building-type-count siege-workshop > 0)
 	(can-train mangonel-line)
 	(unit-type-count-total mangonel-line < 3)
-=>
-	(train mangonel-line)
-)
-(defrule
-	(goal gl-enemy-ranged on)
-	(building-type-count archery-range > 0)
-	(can-train skirmisher-line)
-	(unit-type-count-total skirmisher-line < 8)
-=>
-	(train skirmisher-line)
-)
+=> (train mangonel-line))
 ;endregion
 
 ;region MILITARY: SIEGE & TRASH (Imperial) ========================================
@@ -787,36 +739,25 @@
 	(can-train battering-ram-line)
 	(unit-type-count-total battering-ram-line < 2)
 	(military-population > 14)
-=>
-	(train battering-ram-line)
-)
+=> (train battering-ram-line))
 
 (defrule
 	(current-age == imperial-age)
 	(can-train trebuchet)
 	(unit-type-count-total trebuchet-set < 2)
-=>
-	(train trebuchet)
-)
+=> (train trebuchet))
 
 (defrule
 	(current-age == imperial-age)
 	(gold-amount < 150)
 	(can-train spearman-line)
-=>
-	(train spearman-line)
-)
+=> (train spearman-line))
 (defrule (can-research ri-pikeman)     => (research ri-pikeman))
 (defrule (can-research ri-halberdier)  => (research ri-halberdier))
 ;endregion
 
 ;region TSA-LITE: GROW DEFENDED RADIUS WITH ARMY ==================================
-(defrule
-	(true)
-=>
-	(up-get-fact military-population 0 gl-my-army)
-)
-
+(defrule (true) => (up-get-fact military-population 0 gl-my-army))
 (defrule
 	(up-compare-goal gl-my-army g:>= gl-town-size-step)
 	(strategic-number sn-maximum-town-size < 80)
@@ -842,7 +783,6 @@
 	(enable-timer timer-attack 45)
 	(chat-to-player my-player-number "[MASTER] Attacking: knight mass ready")
 )
-
 (defrule
 	(goal gl-attack on)
 	(timer-triggered timer-attack)
@@ -853,7 +793,6 @@
 	(disable-timer timer-attack)
 	(enable-timer timer-attack 45)
 )
-
 (defrule
 	(goal gl-attack on)
 	(military-population < 6)
@@ -869,15 +808,11 @@
 (defrule
 	(town-under-attack)
 	(strategic-number sn-number-civilian-militia != 8)
-=>
-	(set-strategic-number sn-number-civilian-militia 8)
-)
+=> (set-strategic-number sn-number-civilian-militia 8))
 (defrule
 	(not (town-under-attack))
 	(strategic-number sn-number-civilian-militia != 0)
-=>
-	(set-strategic-number sn-number-civilian-militia 0)
-)
+=> (set-strategic-number sn-number-civilian-militia 0))
 ;endregion
 
 ;region MARKET FAIL-SAFES =========================================================
@@ -888,18 +823,13 @@
 	(wood-amount > 250)
 	(gold-amount > 200)
 	(can-buy-commodity stone)
-=>
-	(buy-commodity stone)
-)
-
+=> (buy-commodity stone))
 (defrule
 	(current-age >= imperial-age)
 	(stone-amount > 500)
 	(gold-amount < 200)
 	(can-sell-commodity stone)
-=>
-	(sell-commodity stone)
-)
+=> (sell-commodity stone))
 ;endregion
 
 ;region RESIGN ====================================================================
@@ -909,20 +839,15 @@
 	(civilian-population < 4)
 	(military-population < 4)
 	(not (can-build town-center))
-=>
-	(chat-to-all "gg wp")
-	(resign)
-)
+=> (chat-to-all "gg wp") (resign))
 ;endregion
 
 ;region DEBUG / TELEMETRY =========================================================
 (defrule (goal gl-debug on)(current-age == feudal-age)  => (chat-to-player my-player-number "[MASTER] >>> FEUDAL AGE")  (disable-self))
 (defrule (goal gl-debug on)(current-age == castle-age)  => (chat-to-player my-player-number "[MASTER] >>> CASTLE AGE")  (disable-self))
 (defrule (goal gl-debug on)(current-age == imperial-age)=> (chat-to-player my-player-number "[MASTER] >>> IMPERIAL AGE")(disable-self))
-
-(defrule (goal gl-debug on)(goal gl-enemy-anti-cav on)  => (chat-to-player my-player-number "[MASTER] counter: enemy anti-cav -> adding crossbows") (disable-self))
-(defrule (goal gl-debug on)(goal gl-enemy-ranged on)    => (chat-to-player my-player-number "[MASTER] counter: enemy ranged -> adding mangonels/skirms") (disable-self))
-
+(defrule (goal gl-debug on)(goal gl-enemy-anti-cav on)  => (chat-to-player my-player-number "[MASTER] counter: enemy spears -> Throwing Axemen") (disable-self))
+(defrule (goal gl-debug on)(goal gl-enemy-ranged on)    => (chat-to-player my-player-number "[MASTER] counter: enemy ranged -> skirms + Fletching") (disable-self))
 (defrule
 	(goal gl-debug on)
 	(timer-triggered timer-debug)
