@@ -1,0 +1,1620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terminus — Train Station Tycoon</title>
+<style>
+  :root{
+    --bg:#12161d; --panel:#1a2029; --panel2:#212a36; --edge:#2e3947;
+    --txt:#dbe4ee; --dim:#8b98a8; --gold:#f2c14e; --green:#5fd068; --red:#e5646c;
+    --blue:#5aa2e8; --accent:#f2914e;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{background:var(--bg); color:var(--txt);
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif; font-size:14px;}
+  #app{max-width:1340px; margin:0 auto; padding:10px 12px;}
+
+  /* ---------- top bar ---------- */
+  #topbar{display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    background:var(--panel); border:1px solid var(--edge); border-radius:10px;
+    padding:8px 12px; margin-bottom:10px;}
+  #topbar h1{font-size:17px; letter-spacing:1px; color:var(--gold); margin-right:6px;}
+  #topbar h1 small{color:var(--dim); font-weight:400; font-size:11px; letter-spacing:0;}
+  .chip{background:var(--panel2); border:1px solid var(--edge); border-radius:8px;
+    padding:4px 10px; white-space:nowrap; font-weight:600;}
+  .chip .lbl{color:var(--dim); font-weight:400; font-size:11px; margin-right:4px;}
+  #cash.neg{color:var(--red);}
+  #xpwrap{display:flex; flex-direction:column; gap:2px; min-width:120px;}
+  #xpbar{height:6px; background:#0d1117; border-radius:3px; overflow:hidden;}
+  #xpfill{height:100%; width:0%; background:linear-gradient(90deg,var(--blue),var(--gold));}
+  #xplbl{font-size:11px; color:var(--dim);}
+  .spacer{flex:1;}
+  button{background:var(--panel2); color:var(--txt); border:1px solid var(--edge);
+    border-radius:7px; padding:5px 10px; cursor:pointer; font-size:13px;}
+  button:hover{border-color:var(--blue);}
+  button.on{background:var(--blue); color:#fff; border-color:var(--blue);}
+  button:disabled{opacity:.45; cursor:not-allowed;}
+  #speeds{display:flex; gap:4px;}
+
+  /* ---------- layout ---------- */
+  #main{display:flex; gap:10px; align-items:flex-start;}
+  #left{flex:1; min-width:0;}
+  canvas{display:block; width:100%; height:auto; border-radius:10px;
+    border:1px solid var(--edge); background:#161b23; cursor:crosshair;}
+  #bottom{display:flex; gap:10px; margin-top:10px; align-items:stretch;}
+  #goalbox{flex:1; background:var(--panel); border:1px solid var(--edge);
+    border-radius:10px; padding:10px 12px;}
+  #goalbox .gt{color:var(--gold); font-weight:700;}
+  #goalbox .gd{color:var(--txt); margin:3px 0;}
+  #goalbox .gr{color:var(--dim); font-size:12px;}
+  #log{flex:1; background:var(--panel); border:1px solid var(--edge); border-radius:10px;
+    padding:8px 12px; font-size:12px; color:var(--dim); overflow-y:auto; max-height:96px;}
+  #log div{padding:1px 0;}
+  #log .good{color:var(--green);} #log .bad{color:var(--red);} #log .gold{color:var(--gold);}
+
+  /* ---------- side panel ---------- */
+  #side{width:330px; flex-shrink:0; background:var(--panel); border:1px solid var(--edge);
+    border-radius:10px; padding:10px; max-height:86vh; overflow-y:auto;}
+  #tabs{display:flex; gap:6px; margin-bottom:10px;}
+  #tabs button{flex:1; font-weight:600;}
+  .cat{color:var(--gold); font-size:12px; text-transform:uppercase; letter-spacing:1px;
+    margin:12px 0 6px;}
+  .cat:first-child{margin-top:0;}
+  .cards{display:grid; grid-template-columns:1fr 1fr; gap:6px;}
+  .card{background:var(--panel2); border:1px solid var(--edge); border-radius:8px;
+    padding:7px 8px; cursor:pointer; position:relative; user-select:none;}
+  .card:hover{border-color:var(--blue);}
+  .card.sel{border-color:var(--gold); box-shadow:0 0 0 1px var(--gold);}
+  .card .e{font-size:20px; line-height:1;}
+  .card .n{font-weight:600; font-size:12px; margin-top:2px;}
+  .card .c{font-size:11px; color:var(--dim);}
+  .card.locked{opacity:.45; cursor:not-allowed;}
+  .card.locked .lock{position:absolute; top:6px; right:8px; font-size:11px; color:var(--gold);}
+  .card.broke .c{color:var(--red);}
+  .card.tool-sell{border-color:#6b3038;}
+
+  .mrow{display:flex; align-items:center; justify-content:space-between; gap:8px;
+    background:var(--panel2); border:1px solid var(--edge); border-radius:8px;
+    padding:7px 9px; margin-bottom:6px;}
+  .mrow .t{font-size:13px;}
+  .mrow .s{font-size:11px; color:var(--dim);}
+  .mrow .ctl{display:flex; gap:5px; align-items:center;}
+  .mrow .ctl b{min-width:16px; text-align:center;}
+  input[type=range]{width:100%;}
+  .lanecard{background:var(--panel2); border:1px solid var(--edge); border-radius:8px;
+    padding:8px 10px; margin-bottom:6px;}
+  .lanecard .hd{display:flex; justify-content:space-between; font-weight:600;}
+  .lanecard .sub{font-size:11px; color:var(--dim); margin:3px 0;}
+  .lanecard .linebtns{display:flex; gap:4px; margin-top:5px;}
+  .lanecard .linebtns button{font-size:11px; padding:3px 7px;}
+  .dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px;}
+
+  /* ---------- toasts / modal / tooltip ---------- */
+  #toasts{position:fixed; left:16px; bottom:16px; z-index:50; display:flex;
+    flex-direction:column; gap:6px; pointer-events:none;}
+  .toast{background:var(--panel2); border:1px solid var(--edge); border-left:4px solid var(--blue);
+    border-radius:8px; padding:8px 14px; max-width:380px; box-shadow:0 4px 16px rgba(0,0,0,.45);
+    animation:tin .25s ease;}
+  .toast.good{border-left-color:var(--green);} .toast.bad{border-left-color:var(--red);}
+  .toast.gold{border-left-color:var(--gold);}
+  @keyframes tin{from{transform:translateY(12px); opacity:0;} to{transform:none; opacity:1;}}
+
+  #tip{position:fixed; z-index:60; background:#0d1117; border:1px solid var(--edge);
+    border-radius:7px; padding:6px 10px; font-size:12px; pointer-events:none;
+    display:none; max-width:260px; box-shadow:0 4px 14px rgba(0,0,0,.5);}
+  #tip .tt{font-weight:700; color:var(--gold);}
+  #tip .td{color:var(--dim);}
+
+  #overlay{position:fixed; inset:0; background:rgba(5,8,12,.72); z-index:80;
+    display:none; align-items:center; justify-content:center;}
+  #overlay.show{display:flex;}
+  #modal{background:var(--panel); border:1px solid var(--edge); border-radius:14px;
+    padding:22px 26px; max-width:520px; width:92%; max-height:82vh; overflow-y:auto;
+    box-shadow:0 10px 40px rgba(0,0,0,.6);}
+  #modal h2{color:var(--gold); margin-bottom:10px; font-size:20px;}
+  #modal ul{margin:8px 0 8px 20px;}
+  #modal li{margin:4px 0;}
+  #modal p{margin:7px 0; line-height:1.45;}
+  #modal .mbtns{display:flex; gap:8px; margin-top:16px; justify-content:flex-end;}
+  #modal .primary{background:var(--gold); color:#1a1408; border-color:var(--gold); font-weight:700;}
+  kbd{background:#0d1117; border:1px solid var(--edge); border-radius:4px; padding:1px 5px;
+    font-size:11px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <h1>🚉 TERMINUS <small>train station tycoon</small></h1>
+    <div class="chip"><span class="lbl">💰</span><span id="cash">$0</span></div>
+    <div class="chip"><span class="lbl">⭐</span><span id="rep">—</span></div>
+    <div class="chip"><span class="lbl">🧽</span><span id="clean">100</span></div>
+    <div id="xpwrap" class="chip">
+      <div id="xplbl">Level 1</div>
+      <div id="xpbar"><div id="xpfill"></div></div>
+    </div>
+    <div class="chip"><span class="lbl">📅</span><span id="clock">Day 1 06:00</span></div>
+    <div class="spacer"></div>
+    <div id="speeds">
+      <button id="sp0" title="Pause (Space)">⏸</button>
+      <button id="sp1" class="on" title="Normal speed">▶</button>
+      <button id="sp2" title="Fast">▶▶</button>
+      <button id="sp3" title="Very fast">▶▶▶</button>
+    </div>
+    <button id="helpbtn" title="How to play">❓</button>
+    <button id="savebtn" title="Save now">💾</button>
+    <button id="resetbtn" title="Start over">🔄</button>
+  </div>
+
+  <div id="main">
+    <div id="left">
+      <canvas id="cv"></canvas>
+      <div id="bottom">
+        <div id="goalbox">
+          <div class="gt" id="goal-title">Goal</div>
+          <div class="gd" id="goal-desc">…</div>
+          <div class="gr" id="goal-reward"></div>
+        </div>
+        <div id="log"></div>
+      </div>
+    </div>
+    <div id="side">
+      <div id="tabs">
+        <button id="tab-build" class="on">🔨 Build</button>
+        <button id="tab-manage">📋 Manage</button>
+      </div>
+      <div id="panel-build"></div>
+      <div id="panel-manage" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<div id="tip"></div>
+<div id="overlay"><div id="modal">
+  <h2 id="modal-title"></h2>
+  <div id="modal-body"></div>
+  <div class="mbtns"><button id="modal-close" class="primary">OK</button></div>
+</div></div>
+
+<script>
+"use strict";
+/* ================================================================
+   TERMINUS — a train station tycoon.
+   One file, no dependencies. Grid-based terminus station:
+   tracks enter from the left and end at buffers; a head concourse
+   on the right links every platform; the main hall sits below.
+   ================================================================ */
+
+/* ---------------- constants ---------------- */
+const W = 28, H = 16, TS = 34;          // grid + tile px
+const TRACK_END = 19;                    // tracks span cols 0..TRACK_END
+const N_LANES = 4;                       // track lanes at rows 0,2,4,6
+const ENTR = {x:23, y:15};               // station entrance
+const GMIN_PER_SEC = 8;                  // game minutes per real second at 1x
+const PAX_SPEED = 55;                    // walk speed px/s
+const MAX_PAX = 280;
+
+const LANE_COST = [0, 1200, 2600, 5200];
+const LANE_LVL  = [1, 3, 6, 8];
+
+const LINES = {
+  local:    {n:'Local',    color:'#5aa2e8', period:40, fare:4,  carCap:6,  maxCars:3, lvl:1, cost:0,    minPlat:1},
+  regional: {n:'Regional', color:'#5fd068', period:65, fare:8,  carCap:8,  maxCars:4, lvl:5, cost:800,  minPlat:4},
+  express:  {n:'Express',  color:'#e5646c', period:95, fare:14, carCap:10, maxCars:5, lvl:8, cost:2000, minPlat:6},
+};
+
+/* building catalog. z: where it may go ('plat' rows / 'conc'ourse / 'both').
+   small buildings never block walking. serves/price/dur = amenity. aura/r = decor. */
+const B = {
+  platform:{n:'Platform',       e:'🛤️', cost:80,  up:1,  z:'plat', lvl:1,  small:false, cat:'Station',
+            d:'Extend platforms along a track. Every 2 tiles lets 1 more train car stop.'},
+  ticket:  {n:'Ticket Machine', e:'🎫', cost:150, up:2,  z:'both', lvl:1,  small:true,  cat:'Station',
+            d:'Passengers must buy a ticket before boarding. More machines = shorter queues.'},
+  bench:   {n:'Bench',          e:'🪑', cost:60,  up:0,  z:'both', lvl:1,  small:true,  cat:'Station', seats:2,
+            d:'Seats 2. Seated passengers stay patient much longer.'},
+  bin:     {n:'Trash Bin',      e:'🗑️', cost:40,  up:1,  z:'both', lvl:1,  small:true,  cat:'Station',
+            d:'Slows the station getting dirty. Cheap and cheerful.'},
+  info:    {n:'Info Board',     e:'ℹ️', cost:120, up:1,  z:'both', lvl:3,  small:true,  cat:'Station',
+            d:'Passengers waiting near one stay patient longer.'},
+  foodcart:{n:'Food Cart',      e:'🌭', cost:250, up:4,  z:'both', lvl:2,  small:true,  cat:'Food & Drink',
+            serves:['hunger'], price:6, dur:3, d:'Quick snacks. Works on platforms too.'},
+  coffee:  {n:'Coffee Shop',    e:'☕', cost:450, up:8,  z:'conc', lvl:3,  small:false, cat:'Food & Drink',
+            serves:['thirst'], price:5, dur:4, d:'Serves thirsty travellers. Solid earner.'},
+  store:   {n:'Mini Market',    e:'🛒', cost:700, up:12, z:'conc', lvl:5,  small:false, cat:'Food & Drink',
+            serves:['hunger','thirst'], price:9, dur:5, d:'Covers food AND drink in one shop.'},
+  fastfood:{n:'Burger Bar',     e:'🍔', cost:900, up:15, z:'conc', lvl:6,  small:false, cat:'Food & Drink',
+            serves:['hunger'], price:12, dur:5, d:'Big meals, big margins.'},
+  restroom:{n:'Restroom',       e:'🚻', cost:300, up:6,  z:'conc', lvl:2,  small:false, cat:'Services',
+            serves:['bladder'], price:1, dur:4, d:'A basic need. Unhappy business without one.'},
+  kiosk:   {n:'News Kiosk',     e:'📰', cost:400, up:6,  z:'both', lvl:4,  small:true,  cat:'Services',
+            serves:['fun'], price:4, dur:3, d:'Papers and magazines for bored waiters.'},
+  arcade:  {n:'Arcade',         e:'🕹️', cost:1000,up:14, z:'conc', lvl:7,  small:false, cat:'Services',
+            serves:['fun'], price:10, dur:6, d:'Bored passengers pour coins into it.'},
+  lounge:  {n:'First-Class Lounge', e:'🛋️', cost:1500, up:20, z:'conc', lvl:9, small:false, cat:'Services',
+            serves:['fun','thirst'], price:16, dur:6, d:'Premium comfort, premium prices.'},
+  plant:   {n:'Planter',        e:'🌳', cost:50,  up:1,  z:'both', lvl:1,  small:true,  cat:'Decor',
+            aura:2, r:3, d:'A touch of green. Small happiness boost nearby.'},
+  fountain:{n:'Fountain',       e:'⛲', cost:600, up:5,  z:'conc', lvl:7,  small:false, cat:'Decor',
+            aura:5, r:4, d:'Impressive centrepiece. Happiness boost nearby.'},
+  statue:  {n:'Golden Statue',  e:'🗽', cost:2500,up:0,  z:'conc', lvl:10, small:false, cat:'Decor',
+            aura:9, r:5, d:'The mark of a grand terminus. Big happiness aura.'},
+};
+const CATS = ['Station','Food & Drink','Services','Decor'];
+
+const STAFF = {
+  jan:{n:'Janitor',        e:'🧹', wage:25, lvl:4, max:5, d:'Restores cleanliness over time.'},
+  att:{n:'Attendant',      e:'💁', wage:30, lvl:6, max:3, d:'Speeds up ticket queues.'},
+  gua:{n:'Security Guard', e:'💂', wage:35, lvl:7, max:3, d:'Crowds stay calmer and more patient.'},
+};
+
+/* XP thresholds: TH[lvl] = xp needed to reach lvl+1 */
+const TH = [0, 40, 120, 260, 480, 800, 1200, 1750, 2450, 3300];
+const MAX_LVL = 10;
+
+/* demand multiplier by hour of day (rush at 7-9 and 17-19) */
+const HOURF = [0.15,0.10,0.10,0.10,0.20,0.50,1.20,2.20,2.40,1.60,1.20,1.30,
+               1.50,1.30,1.20,1.30,1.70,2.40,2.20,1.50,1.00,0.70,0.40,0.25];
+/* arriving-train load factor by hour (people coming INTO your station) */
+const INF   = [0.10,0.10,0.10,0.10,0.15,0.40,1.00,1.60,1.80,1.40,1.10,1.20,
+               1.40,1.20,1.10,1.20,1.60,2.00,1.90,1.30,0.90,0.60,0.35,0.20];
+
+const NEEDK = ['hunger','thirst','bladder','fun'];
+const NEED_EMO = {hunger:'🍔', thirst:'💧', bladder:'🚻', fun:'😐'};
+
+/* ---------------- state ---------------- */
+let S = null;         // persistent game state
+let PAX = [];         // live passengers (not saved)
+let IDX = null;       // derived index of buildings (rebuilt on change)
+let tool = null;      // selected build tool id, or 'sell'
+let hover = null;     // hovered tile {x,y}
+const SAVE_KEY = 'terminus-save-v1';
+
+function newGame(){
+  const grid = [];
+  for(let y=0;y<H;y++){
+    const row=[];
+    for(let x=0;x<W;x++) row.push({p:0,b:null});
+    grid.push(row);
+  }
+  S = {
+    cash: 2500, xp: 0, level: 1, rep: 55, clean: 100,
+    gsec: 0,                 // total elapsed game-scaled seconds
+    gmin: 6*60,              // clock, minutes since midnight
+    day: 1, speed: 1, paused: false,
+    fare: 1.0,               // global fare multiplier
+    staff: {jan:0, att:0, gua:0},
+    mktUntil: -1, bailed: false, over: false,
+    goalIdx: 0,
+    lanes: [
+      {owned:true,  line:'local', nextT:14, train:null},
+      {owned:false, line:null, nextT:0, train:null},
+      {owned:false, line:null, nextT:0, train:null},
+      {owned:false, line:null, nextT:0, train:null},
+    ],
+    grid,
+    stats: {boardTotal:0, boardToday:0, arrToday:0, tickToday:0, amenToday:0,
+            spentToday:0, hist:[]},
+  };
+  // starter kit: 4 platform tiles on track 1, a ticket machine, a bench
+  for(let x=16;x<=19;x++) grid[1][x].p = 1;
+  grid[12][23].b = 'ticket';
+  grid[1][18].b  = 'bench';
+  rebuildIndex();
+}
+
+/* zones. Track lane i sits at row 2i (cols 0..TRACK_END); its platform is the
+   row below. Everything else — rows 8+, and cols >TRACK_END — is concourse. */
+function zone(x,y){
+  if(x<0||y<0||x>=W||y>=H) return {k:'void'};
+  if(x<=TRACK_END && y<=2*N_LANES-1){
+    if(y%2===0) return {k:'track', lane:y/2};
+    return {k:'plat', lane:(y-1)/2};
+  }
+  return {k:'conc'};
+}
+
+function walkable(x,y){
+  const z = zone(x,y);
+  if(z.k==='void'||z.k==='track') return false;
+  const t = S.grid[y][x];
+  if(z.k==='plat' && !t.p) return false;
+  return !t.b || B[t.b].small;
+}
+
+/* ---------------- derived index ---------------- */
+function rebuildIndex(){
+  IDX = {machines:[], amen:[], benches:[], decors:[], infos:[],
+         plat:[0,0,0,0], counts:{}, upkeep:0, bins:0, platTotal:0};
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const t = S.grid[y][x];
+    if(t.p){ IDX.upkeep += B.platform.up; IDX.platTotal++;
+      const z=zone(x,y); if(z.k==='plat') IDX.plat[z.lane]++; }
+    if(!t.b) continue;
+    const d = B[t.b];
+    IDX.counts[t.b] = (IDX.counts[t.b]||0)+1;
+    IDX.upkeep += d.up;
+    if(t.b==='ticket') IDX.machines.push({x,y});
+    if(t.b==='bench')  IDX.benches.push({x,y});
+    if(t.b==='bin')    IDX.bins++;
+    if(t.b==='info')   IDX.infos.push({x,y});
+    if(d.serves)       IDX.amen.push({x,y,id:t.b,d});
+    if(d.aura)         IDX.decors.push({x,y,aura:d.aura,r:d.r});
+  }
+}
+function countB(id){ return (IDX.counts[id]||0); }
+
+function auraAt(x,y){
+  let a=0;
+  for(const d of IDX.decors){
+    if(Math.abs(d.x-x)<=d.r && Math.abs(d.y-y)<=d.r) a+=d.aura;
+  }
+  return Math.min(a,15);
+}
+function infoNear(x,y){
+  return IDX.infos.some(i=>Math.abs(i.x-x)<=4 && Math.abs(i.y-y)<=4);
+}
+
+/* ---------------- pathfinding (BFS to any goal tile) ---------------- */
+function findPath(sx,sy,goals){
+  // goals: array of {x,y} walkable target tiles
+  const gset = new Set(goals.map(g=>g.y*W+g.x));
+  if(gset.has(sy*W+sx)) return [];
+  const prev = new Int16Array(W*H).fill(-1);
+  const seen = new Uint8Array(W*H);
+  const q=[sy*W+sx]; seen[sy*W+sx]=1;
+  let found=-1;
+  while(q.length){
+    const c=q.shift(), cx=c%W, cy=(c-cx)/W;
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx=cx+dx, ny=cy+dy;
+      if(nx<0||ny<0||nx>=W||ny>=H) continue;
+      const n=ny*W+nx;
+      if(seen[n]) continue;
+      if(!walkable(nx,ny)) continue;
+      seen[n]=1; prev[n]=c;
+      if(gset.has(n)){ found=n; q.length=0; break; }
+      q.push(n);
+    }
+  }
+  if(found<0) return null;
+  const path=[];
+  for(let c=found;c!==sy*W+sx;c=prev[c]) path.push({x:c%W,y:(c-c%W)/W});
+  path.reverse();
+  return path;
+}
+
+/* walkable tiles adjacent to (or on top of, if small) a building tile */
+function accessTiles(x,y){
+  const t=S.grid[y][x];
+  if(t.b && B[t.b].small && walkable(x,y)) return [{x,y}];
+  const out=[];
+  for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+    if(walkable(x+dx,y+dy)) out.push({x:x+dx,y:y+dy});
+  }
+  return out;
+}
+
+/* ---------------- placement ---------------- */
+function canPlace(id,x,y){
+  const z=zone(x,y);
+  if(z.k==='void'||z.k==='track') return {ok:false,why:'Cannot build on tracks'};
+  if(x===ENTR.x&&y===ENTR.y) return {ok:false,why:'The entrance must stay clear'};
+  const t=S.grid[y][x], d=B[id];
+  if(id==='platform'){
+    if(z.k!=='plat') return {ok:false,why:'Platforms go on the row beside a track'};
+    if(!S.lanes[z.lane].owned) return {ok:false,why:'Buy this track first (Manage tab)'};
+    if(t.p) return {ok:false,why:'Already a platform here'};
+    return {ok:true};
+  }
+  if(t.b) return {ok:false,why:'Tile occupied'};
+  if(z.k==='plat'){
+    if(d.z==='conc') return {ok:false,why:'Too big for a platform — build it in the concourse'};
+    if(!t.p) return {ok:false,why:'Build a platform tile here first'};
+  }else{
+    if(d.z==='plat') return {ok:false,why:'Platforms go beside tracks'};
+  }
+  if(!d.small){
+    if(!connectivityOK(()=>{ S.grid[y][x].b=id; }, ()=>{ S.grid[y][x].b=null; }))
+      return {ok:false,why:'That would block passengers walking through'};
+  }
+  return {ok:true};
+}
+
+/* apply a hypothetical change, flood-fill from the entrance, and require
+   every platform tile, small building and live passenger stays reachable */
+function connectivityOK(apply,undo){
+  apply();
+  const seen=new Uint8Array(W*H);
+  const q=[ENTR.y*W+ENTR.x]; seen[ENTR.y*W+ENTR.x]=1;
+  while(q.length){
+    const c=q.pop(), cx=c%W, cy=(c-cx)/W;
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx=cx+dx, ny=cy+dy;
+      if(nx<0||ny<0||nx>=W||ny>=H) continue;
+      const n=ny*W+nx;
+      if(!seen[n] && walkable(nx,ny)){ seen[n]=1; q.push(n); }
+    }
+  }
+  let ok=true;
+  outer:
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const t=S.grid[y][x];
+    const must = (t.p && zone(x,y).k==='plat') || (t.b && B[t.b].small);
+    if(must && walkable(x,y) && !seen[y*W+x]){ ok=false; break outer; }
+  }
+  if(ok) for(const p of PAX){
+    const px=Math.round(p.x/TS-0.5), py=Math.round(p.y/TS-0.5);
+    if(px>=0&&py>=0&&px<W&&py<H && walkable(px,py) && !seen[py*W+px]){ ok=false; break; }
+  }
+  undo();
+  return ok;
+}
+
+function place(id,x,y){
+  const d=B[id];
+  if(S.level<d.lvl){ toast(d.n+' unlocks at Level '+d.lvl,'bad'); return false; }
+  const chk=canPlace(id,x,y);
+  if(!chk.ok){ toast(chk.why,'bad'); return false; }
+  if(S.cash<d.cost){ toast('Not enough cash — need '+fmt$(d.cost),'bad'); return false; }
+  S.cash-=d.cost;
+  if(id==='platform') S.grid[y][x].p=1; else S.grid[y][x].b=id;
+  rebuildIndex(); renderManage();
+  return true;
+}
+
+function demolish(x,y){
+  const t=S.grid[y][x], z=zone(x,y);
+  if(t.b){
+    const id=t.b, d=B[id];
+    if(id==='bench' && PAX.some(p=>p.seat && p.seat.x===x && p.seat.y===y)){
+      toast('Someone is sitting there!','bad'); return;
+    }
+    if(!d.small && !connectivityOK(()=>{t.b=null;}, ()=>{t.b=id;})){
+      toast('Removing that would trap passengers','bad'); return;
+    }
+    t.b=null; S.cash+=Math.floor(d.cost/2);
+    toast('Sold '+d.n+' for '+fmt$(Math.floor(d.cost/2)),'');
+    rebuildIndex(); renderManage();
+  }else if(t.p && z.k==='plat'){
+    if(PAX.some(p=>p.tileX()===x && p.tileY()===y)){
+      toast('A passenger is standing there!','bad'); return;
+    }
+    if(!connectivityOK(()=>{t.p=0;}, ()=>{t.p=1;})){
+      toast('That would strand part of the platform','bad'); return;
+    }
+    t.p=0; S.cash+=Math.floor(B.platform.cost/2);
+    rebuildIndex(); renderManage();
+  }
+}
+
+/* ---------------- save / load ---------------- */
+function save(){
+  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(S)); }catch(e){}
+}
+function load(){
+  try{
+    const raw = localStorage.getItem(SAVE_KEY);
+    if(!raw) return false;
+    const s = JSON.parse(raw);
+    if(!s || !s.grid || s.grid.length!==H) return false;
+    S = s;
+    // trains and passengers are transient — reset them
+    for(const l of S.lanes){ l.train=null; if(l.owned) l.nextT = S.gsec + 8 + Math.random()*10; }
+    for(const row of S.grid) for(const t of row) t.occ = 0;
+    S.paused = false; S.speed = Math.min(S.speed||1, 4);
+    rebuildIndex();
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ---------------- helpers ---------------- */
+function fmt$(v){ return '$'+Math.round(v).toLocaleString('en-US'); }
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function hourNow(){ return Math.floor(S.gmin/60)%24; }
+function ownedLanes(){ return S.lanes.filter(l=>l.owned).length; }
+function servableLanes(){
+  const out=[];
+  for(let i=0;i<N_LANES;i++) if(S.lanes[i].owned && IDX.plat[i]>0) out.push(i);
+  return out;
+}
+function addXP(n){
+  S.xp += n;
+  while(S.level<MAX_LVL && S.xp>=TH[S.level]){
+    S.level++;
+    levelUpModal(S.level);
+    buildPalette(); renderManage();
+  }
+}
+function bumpRep(happiness, w){
+  S.rep = clamp(S.rep + (happiness - S.rep)*w, 0, 100);
+}
+
+/* ---------------- passengers ---------------- */
+let paxSeq = 0;
+const PAX_COLORS = ['#e8b45a','#5ae8c4','#e85a8f','#8f5ae8','#5a9de8','#a2e85a',
+                    '#e8825a','#5ae86e','#e85ad9','#c9c9c9'];
+
+function makePax(kind, x, y, lane){
+  const p = {
+    id: paxSeq++, kind, lane,
+    x: (x+0.5)*TS, y: (y+0.5)*TS,
+    path: null, pi: 0, tmr: 0,
+    st: kind==='dep' ? 'spawn' : 'arr',
+    needs: {hunger:rnd(15,60), thirst:rnd(15,60), bladder:rnd(10,55), fun:rnd(20,65)},
+    ndR: rnd(0.7,1.3),
+    pat: rnd(35,75) + S.staff.gua*6,
+    wt: 0, hap: 90, tick: false, seat: null, visits: 0,
+    col: PAX_COLORS[(Math.random()*PAX_COLORS.length)|0],
+    dead: false,
+    tileX(){ return clamp(Math.floor(this.x/TS),0,W-1); },
+    tileY(){ return clamp(Math.floor(this.y/TS),0,H-1); },
+  };
+  return p;
+}
+
+function spawnDeparture(){
+  const lanes = servableLanes();
+  if(!lanes.length) return;
+  const lane = lanes[(Math.random()*lanes.length)|0];
+  PAX.push(makePax('dep', ENTR.x, ENTR.y, lane));
+}
+
+function goTo(p, goals, okState, failState){
+  const path = findPath(p.tileX(), p.tileY(), goals);
+  if(path===null){ p.st = failState || 'giveup'; p.tmr = 0; return false; }
+  p.path = path; p.pi = 0; p.st = okState;
+  return true;
+}
+
+function releaseSeat(p){
+  if(p.seat){
+    const t=S.grid[p.seat.y][p.seat.x];
+    t.occ = Math.max(0,(t.occ||0)-1);
+    p.seat=null;
+  }
+}
+
+function finalizeHappiness(p){
+  let h = p.hap;
+  h += auraAt(p.tileX(), p.tileY());
+  if(S.fare>1) h -= (S.fare-1)*28; else h += (1-S.fare)*10;
+  if(S.clean<55) h -= (55-S.clean)*0.35;
+  return clamp(h,0,100);
+}
+
+function despawn(p){ p.dead=true; releaseSeat(p); }
+
+/* the brain: called whenever a passenger finishes a path or a timer */
+function think(p){
+  switch(p.st){
+    case 'spawn': { // departing passenger just entered: buy a ticket
+      if(!IDX.machines.length){
+        p.hap-=25; p.st='fume'; p.tmr=8; return;
+      }
+      const goals=[];
+      for(const m of IDX.machines) goals.push(...accessTiles(m.x,m.y));
+      if(!goals.length){ p.st='fume'; p.tmr=8; return; }
+      goTo(p, goals, 'toTicket');
+      return;
+    }
+    case 'fume': { // waited around, nothing worked — leave angry
+      bumpRep(finalizeHappiness(p)*0.4, 0.03);
+      log('A passenger left in disgust — no way to buy a ticket','bad');
+      p.st='toExit';
+      goTo(p, [ENTR], 'toExit', 'giveup');
+      return;
+    }
+    case 'toTicket': { // arrived at a machine: queue + serve
+      const queued = PAX.filter(o=>!o.dead && o!==p && o.st==='buying'
+        && Math.abs(o.x-p.x)<TS*2 && Math.abs(o.y-p.y)<TS*2).length;
+      p.st='buying';
+      p.tmr = 1.4 * Math.pow(0.78, S.staff.att) * (1 + 0.45*queued);
+      return;
+    }
+    case 'buying': {
+      p.tick = true;
+      S.stats.tickToday++;
+      p.st='decide'; p.tmr=0;
+      return;
+    }
+    case 'decide': return decideNext(p);
+    case 'toAmen': { // reached the amenity: use it, pay
+      const a = p.amen;
+      p.st='using'; p.tmr = a.d.dur;
+      S.cash += a.d.price;
+      S.stats.amenToday += a.d.price;
+      S.stats.spentToday += a.d.price;
+      return;
+    }
+    case 'using': {
+      const a=p.amen;
+      for(const k of a.d.serves) p.needs[k] = Math.min(p.needs[k], 12);
+      p.hap = Math.min(100, p.hap+6);
+      addXP(1);
+      p.amen=null; p.visits++;
+      p.st = (p.kind==='dep') ? 'decide' : 'arrDecide';
+      p.tmr=0;
+      return;
+    }
+    case 'toPlat': { // standing on the platform now
+      p.st='wait'; p.tmr=0.6;
+      // grab a nearby free bench on this platform row
+      const row=p.tileY();
+      let best=null,bd=99;
+      for(const b of IDX.benches){
+        if(b.y!==row) continue;
+        const t=S.grid[b.y][b.x];
+        if((t.occ||0)>=B.bench.seats) continue;
+        const dd=Math.abs(b.x-p.tileX());
+        if(dd<bd && dd<=5){bd=dd;best=b;}
+      }
+      if(best){
+        const t=S.grid[best.y][best.x];
+        t.occ=(t.occ||0)+1;
+        p.seat={x:best.x,y:best.y};
+        goTo(p,[best],'toSeat');
+        if(p.st!=='toSeat'){ t.occ--; p.seat=null; p.st='wait'; }
+      }
+      if(infoNear(p.tileX(),p.tileY())) p.pat += 12;
+      return;
+    }
+    case 'toSeat': { p.st='wait'; p.tmr=0.8; return; }
+    case 'wait': { p.tmr=0.8; return; }   // heartbeat; boarding is train-driven
+    case 'board': { p.st='boarded'; return; }  // reached the door — inside now
+    case 'boarded': return;
+    case 'arr': { // just got off a train
+      addXP(1);
+      p.tick=false;
+      p.st='arrDecide'; p.tmr=0;
+      return;
+    }
+    case 'arrDecide': {
+      if(p.visits<2 && Math.random()<0.6){
+        const k = topNeed(p);
+        if(p.needs[k]>50 && tryAmenity(p,k)) return;
+      }
+      bumpRep(finalizeHappiness(p), 0.012);
+      goTo(p, [ENTR], 'toExit', 'giveup');
+      return;
+    }
+    case 'toExit': { despawn(p); return; }
+    case 'giveup': { // pathing failed somewhere — vanish quietly, small rep hit
+      bumpRep(40, 0.01);
+      despawn(p);
+      return;
+    }
+  }
+}
+
+function topNeed(p){
+  let bk=NEEDK[0], bv=-1;
+  for(const k of NEEDK) if(p.needs[k]>bv){bv=p.needs[k];bk=k;}
+  return bk;
+}
+
+function tryAmenity(p, needKey){
+  const opts = IDX.amen.filter(a=>a.d.serves.includes(needKey));
+  if(!opts.length) return false;
+  // nearest by manhattan distance
+  opts.sort((a,b)=>(Math.abs(a.x-p.tileX())+Math.abs(a.y-p.tileY()))
+                 -(Math.abs(b.x-p.tileX())+Math.abs(b.y-p.tileY())));
+  for(const a of opts){
+    const goals = accessTiles(a.x,a.y);
+    if(!goals.length) continue;
+    p.amen = a;
+    if(goTo(p, goals, 'toAmen')) return true;
+    p.amen = null;
+  }
+  return false;
+}
+
+function decideNext(p){
+  const lane = S.lanes[p.lane];
+  if(!lane.owned || IDX.plat[p.lane]===0){ p.st='fume'; p.tmr=4; return; }
+  const timeLeft = lane.nextT - S.gsec + (lane.train?99:0);
+  const k = topNeed(p);
+  if(p.visits<2 && timeLeft>22 && p.needs[k]>55 && tryAmenity(p,k)) return;
+  // head to the platform: pick a random built platform tile on our lane row
+  const row = p.lane*2+1;
+  const tiles=[];
+  for(let x=0;x<=TRACK_END;x++) if(S.grid[row][x].p && walkable(x,row)) tiles.push({x,y:row});
+  if(!tiles.length){ p.st='fume'; p.tmr=4; return; }
+  // bias toward the right (where trains stop first)
+  tiles.sort((a,b)=>b.x-a.x);
+  const pick = tiles[Math.min(tiles.length-1, (Math.random()*Math.min(tiles.length,6))|0)];
+  goTo(p, [pick], 'toPlat', 'giveup');
+}
+
+/* ---------------- per-frame passenger update ---------------- */
+function updatePax(dt){
+  for(const p of PAX){
+    if(p.dead) continue;
+    // needs creep up over time
+    p.needs.hunger  = Math.min(100, p.needs.hunger +0.32*p.ndR*dt);
+    p.needs.thirst  = Math.min(100, p.needs.thirst +0.45*p.ndR*dt);
+    p.needs.bladder = Math.min(100, p.needs.bladder+0.38*p.ndR*dt);
+    p.needs.fun     = Math.min(100, p.needs.fun    +0.30*p.ndR*dt);
+
+    // waiting wears patience down
+    if(p.st==='buying'||p.st==='wait'||p.st==='fume'){
+      p.wt += dt;
+      if(p.wt > p.pat){
+        const rate = p.seat ? 0.55 : 1.4;
+        p.hap = Math.max(0, p.hap - rate*dt);
+      }
+      for(const k of NEEDK) if(p.needs[k]>85) p.hap = Math.max(0,p.hap-0.06*dt);
+    }
+
+    // walk along path
+    if(p.path && p.pi < p.path.length){
+      const n = p.path[p.pi];
+      const tx=(n.x+0.5)*TS, ty=(n.y+0.5)*TS;
+      const dx=tx-p.x, dy=ty-p.y;
+      const d=Math.hypot(dx,dy), step=PAX_SPEED*dt;
+      if(d<=step){ p.x=tx; p.y=ty; p.pi++; }
+      else { p.x+=dx/d*step; p.y+=dy/d*step; }
+      if(p.pi>=p.path.length){ p.path=null; think(p); }
+    } else if(p.tmr>0){
+      p.tmr-=dt;
+      if(p.tmr<=0) think(p);
+    } else {
+      think(p);
+    }
+  }
+  // sweep the dead
+  if(PAX.length && PAX.some(p=>p.dead)) PAX = PAX.filter(p=>!p.dead);
+}
+
+/* ---------------- demand & spawning ---------------- */
+let spawnAcc = 0;
+function updateSpawn(dt){
+  if(!servableLanes().length) return;
+  const repF  = 0.35 + (S.rep/100)*1.25;
+  const fareF = S.fare<=1 ? 1+(1-S.fare)*0.5 : Math.max(0.25, 1-(S.fare-1)*0.55);
+  const mktF  = S.gsec < S.mktUntil ? 1.5 : 1;
+  const clnF  = S.clean<40 ? 0.8 : 1;
+  const base  = 0.055 * (1 + 0.5*S.level + 1.2*(ownedLanes()-1));
+  const rate  = base * HOURF[hourNow()] * repF * fareF * mktF * clnF;
+  spawnAcc += rate*dt;
+  while(spawnAcc>=1){
+    spawnAcc-=1;
+    if(PAX.length<MAX_PAX) spawnDeparture();
+  }
+}
+
+/* ---------------- trains ---------------- */
+const TRAIN_IN=2.2, TRAIN_DWELL=5.5, TRAIN_OUT=2.2;
+let skipWarnAt = -99;
+
+function updateTrains(dt){
+  for(let i=0;i<N_LANES;i++){
+    const lane=S.lanes[i];
+    if(!lane.owned) continue;
+    const L=LINES[lane.line];
+
+    if(!lane.train && S.gsec>=lane.nextT){
+      if(IDX.plat[i]===0){
+        lane.nextT = S.gsec + L.period;
+        if(S.gsec-skipWarnAt>20){
+          skipWarnAt=S.gsec;
+          toast('A train skipped Track '+(i+1)+' — build a platform beside it!','bad');
+        }
+        continue;
+      }
+      const cars = clamp(Math.floor(IDX.plat[i]/2), 1, L.maxCars);
+      lane.train = {phase:'in', t:0, cars, boarded:0, alighted:0};
+    }
+    const tr=lane.train;
+    if(!tr) continue;
+    tr.t+=dt;
+
+    if(tr.phase==='in' && tr.t>=TRAIN_IN){
+      tr.phase='dwell'; tr.t=0;
+      trainArrivals(i,tr);
+      trainBoarding(i,tr);
+    } else if(tr.phase==='dwell' && tr.t>=TRAIN_DWELL){
+      tr.phase='out'; tr.t=0;
+      // late boarders still walking to the doors get scooped up
+      for(const p of PAX){
+        if(!p.dead && p.lane===i && (p.st==='board'||p.st==='boarded')) despawn(p);
+      }
+    } else if(tr.phase==='out' && tr.t>=TRAIN_OUT){
+      lane.train=null;
+      const rush = HOURF[hourNow()]>1.8;
+      lane.nextT = S.gsec + L.period*(rush?0.75:1);
+    }
+  }
+}
+
+function trainDoorCols(laneIdx, tr){
+  // train parks nose against the buffer; one door per car
+  const cols=[];
+  const nose=TRACK_END;                       // rightmost col of the train
+  for(let c=0;c<tr.cars;c++){
+    const col = nose - 1 - c*2;               // car centres, 2 tiles per car
+    if(col>=0) cols.push(col);
+  }
+  return cols;
+}
+
+function trainArrivals(laneIdx, tr){
+  const lane=S.lanes[laneIdx], L=LINES[lane.line];
+  const row=laneIdx*2+1;
+  const cap=tr.cars*L.carCap;
+  let n=Math.round(cap * INF[hourNow()] * rnd(0.25,0.75));
+  n=Math.min(n, MAX_PAX-PAX.length);
+  const doors=trainDoorCols(laneIdx,tr).filter(c=>S.grid[row][c] && S.grid[row][c].p);
+  const spots=doors.length?doors:null;
+  if(!spots) return;
+  for(let k=0;k<n;k++){
+    const c=spots[(Math.random()*spots.length)|0];
+    const p=makePax('arr', c, row, laneIdx);
+    PAX.push(p);
+    tr.alighted++;
+  }
+}
+
+function trainBoarding(laneIdx, tr){
+  const lane=S.lanes[laneIdx], L=LINES[lane.line];
+  const row=laneIdx*2+1;
+  const cap=tr.cars*L.carCap;
+  const waiting=PAX.filter(p=>!p.dead && p.kind==='dep' && p.lane===laneIdx
+    && p.tick && (p.st==='wait'||p.st==='toSeat'||p.st==='toPlat') && p.tileY()===row);
+  waiting.sort((a,b)=>b.wt-a.wt);   // longest waiters first
+  const doors=trainDoorCols(laneIdx,tr).filter(c=>S.grid[row][c].p && walkable(c,row));
+  let n=0;
+  const fare=L.fare*S.fare;
+  for(const p of waiting){
+    if(n>=cap) break;
+    n++;
+    S.cash+=fare;
+    S.stats.boardTotal++; S.stats.boardToday++;
+    S.stats.spentToday+=fare;
+    addXP(2);
+    bumpRep(finalizeHappiness(p), 0.03);
+    releaseSeat(p);
+    // walk to the nearest door, then vanish inside
+    if(doors.length){
+      let best=doors[0],bd=99;
+      for(const c of doors){const dd=Math.abs(c-p.tileX()); if(dd<bd){bd=dd;best=c;}}
+      p.path=null;
+      goTo(p,[{x:best,y:row}],'board','boarded');
+    } else { p.st='boarded'; }
+    tr.boarded++;
+  }
+  if(n>0) S.stats.tickRevToday=(S.stats.tickRevToday||0)+n*fare;
+  // everyone left behind takes a happiness hit if the train was full
+  if(waiting.length>cap){
+    for(let k=cap;k<waiting.length;k++) waiting[k].hap=Math.max(0,waiting[k].hap-8);
+  }
+}
+
+/* ---------------- clock, cleanliness, daily books ---------------- */
+function updateClock(dt){
+  S.gsec += dt;
+  S.gmin += dt*GMIN_PER_SEC;
+  if(S.gmin>=1440){
+    S.gmin-=1440;
+    endOfDay();
+  }
+  // cleanliness: foot traffic dirties, bins slow it, janitors fix it
+  const binF = 1 - Math.min(IDX.bins*0.06, 0.5);
+  const dirt = PAX.length*0.0028*binF;
+  S.clean = clamp(S.clean + (S.staff.jan*0.05 - dirt)*dt, 5, 100);
+}
+
+function wagesTotal(){
+  return S.staff.jan*STAFF.jan.wage + S.staff.att*STAFF.att.wage + S.staff.gua*STAFF.gua.wage;
+}
+
+function endOfDay(){
+  const st=S.stats;
+  const upkeep=IDX.upkeep, wages=wagesTotal();
+  const income=(st.tickRevToday||0)+st.amenToday;
+  const net=income-upkeep-wages;
+  S.cash-=upkeep+wages;
+  st.hist.push({day:S.day, income, upkeep:upkeep+wages, served:st.boardToday+st.arrToday});
+  if(st.hist.length>30) st.hist.shift();
+  toast('📒 Day '+S.day+' books — income '+fmt$(income)+', costs '+fmt$(upkeep+wages)
+    +' → '+(net>=0?'profit ':'loss ')+fmt$(Math.abs(net)), net>=0?'good':'bad');
+  S.day++;
+  st.boardToday=0; st.arrToday=0; st.tickToday=0; st.amenToday=0;
+  st.spentToday=0; st.tickRevToday=0;
+  checkBankruptcy();
+  save();
+}
+
+function checkBankruptcy(){
+  if(S.cash>-1200 || S.over) return;
+  if(!S.bailed){
+    S.bailed=true; S.cash+=2500; S.rep=Math.max(5,S.rep-15);
+    showModal('🆘 Emergency bailout',
+      '<p>The city stepped in to cover your debts — once.</p>'+
+      '<p>You receive <b>$2,500</b>, but your reputation takes a <b>-15</b> hit. '+
+      'There will be no second rescue: keep the books balanced.</p>');
+  } else if(S.cash<-2500){
+    S.over=true;
+    showModal('💀 Bankrupt',
+      '<p>The creditors have seized the station. Final stats:</p>'+
+      '<ul><li>Days operated: '+S.day+'</li>'+
+      '<li>Passengers served: '+S.stats.boardTotal.toLocaleString()+'</li>'+
+      '<li>Level reached: '+S.level+'</li></ul>'+
+      '<p>Press 🔄 in the top bar to start a new station.</p>');
+    S.paused=true;
+  }
+}
+
+/* rush hour announcements */
+let lastHour=-1;
+function hourTick(){
+  const h=hourNow();
+  if(h===lastHour) return;
+  lastHour=h;
+  if(h===7)  toast('🌅 Morning rush! Passenger numbers surging','gold');
+  if(h===17) toast('🌆 Evening rush! Passenger numbers surging','gold');
+  if(h===22) toast('🌙 Things are quieting down for the night','');
+}
+
+/* ---------------- goals ---------------- */
+const GOALS=[
+  {t:'Take a seat',      d:'Have 3 benches in your station', r:120, xp:15,
+   c:()=>countB('bench')>=3},
+  {t:'First riders',     d:'Serve 8 departing passengers', r:150, xp:20,
+   c:()=>S.stats.boardTotal>=8},
+  {t:'Snack time',       d:'Build a Food Cart (unlocks at Level 2)', r:200, xp:20,
+   c:()=>countB('foodcart')>=1},
+  {t:'Creature comforts',d:'Have a Restroom and a Coffee Shop', r:250, xp:25,
+   c:()=>countB('restroom')>=1&&countB('coffee')>=1},
+  {t:'Good reviews',     d:'Reach 65 reputation', r:300, xp:30,
+   c:()=>S.rep>=65},
+  {t:'Long platform',    d:'Extend the Track 1 platform to 6 tiles', r:250, xp:25,
+   c:()=>IDX.plat[0]>=6},
+  {t:'Expansion',        d:'Own Track 2 with 4+ platform tiles (Manage tab)', r:500, xp:40,
+   c:()=>S.lanes[1].owned&&IDX.plat[1]>=4},
+  {t:'Busy day',         d:'Serve 60 passengers in a single day', r:500, xp:40,
+   c:()=>S.stats.boardToday+S.stats.arrToday>=60},
+  {t:'Regional service', d:'Upgrade a line to Regional (Manage tab)', r:600, xp:50,
+   c:()=>S.lanes.some(l=>l.owned&&l.line==='regional')},
+  {t:'Station of note',  d:'Reach Level 7', r:800, xp:60,
+   c:()=>S.level>=7},
+  {t:'Three tracks',     d:'Own 3 tracks', r:900, xp:60,
+   c:()=>ownedLanes()>=3},
+  {t:'Express era',      d:'Run an Express line', r:1500, xp:80,
+   c:()=>S.lanes.some(l=>l.owned&&l.line==='express')},
+  {t:'Grand Terminus',   d:'85+ reputation and 200 passengers in one day', r:2500, xp:150,
+   c:()=>S.rep>=85&&(S.stats.boardToday+S.stats.arrToday)>=200},
+];
+
+let goalCd=0;
+function updateGoals(dt){
+  goalCd-=dt;
+  if(goalCd>0) return;
+  goalCd=0.5;
+  const g=GOALS[S.goalIdx];
+  if(g && g.c()){
+    S.cash+=g.r;
+    addXP(g.xp);
+    toast('🏁 Goal complete: '+g.t+' — +'+fmt$(g.r)+', +'+g.xp+' XP','gold');
+    log('Goal complete: '+g.t,'gold');
+    S.goalIdx++;
+    renderGoal();
+  }
+}
+
+/* ---------------- lane / line management actions ---------------- */
+function buyLane(i){
+  if(S.lanes[i].owned) return;
+  if(S.level<LANE_LVL[i]){ toast('Track '+(i+1)+' unlocks at Level '+LANE_LVL[i],'bad'); return; }
+  if(S.cash<LANE_COST[i]){ toast('Need '+fmt$(LANE_COST[i])+' for Track '+(i+1),'bad'); return; }
+  S.cash-=LANE_COST[i];
+  S.lanes[i]={owned:true, line:'local', nextT:S.gsec+15, train:null};
+  toast('🛤️ Track '+(i+1)+' opened! Build a platform beside it','good');
+  log('Track '+(i+1)+' purchased','good');
+  renderManage();
+}
+
+function setLine(i, key){
+  const lane=S.lanes[i];
+  if(!lane.owned || lane.line===key) return;
+  const L=LINES[key];
+  if(S.level<L.lvl){ toast(L.n+' lines unlock at Level '+L.lvl,'bad'); return; }
+  if(IDX.plat[i]<L.minPlat){
+    toast(L.n+' trains need a '+L.minPlat+'-tile platform on Track '+(i+1),'bad'); return;
+  }
+  if(S.cash<L.cost){ toast('Switching costs '+fmt$(L.cost),'bad'); return; }
+  S.cash-=L.cost;
+  lane.line=key;
+  lane.nextT=Math.min(lane.nextT, S.gsec+L.period);
+  toast('🚆 Track '+(i+1)+' now runs a '+L.n+' service','good');
+  renderManage();
+}
+
+function hireStaff(k, delta){
+  const d=STAFF[k];
+  if(S.level<d.lvl){ toast(d.n+'s unlock at Level '+d.lvl,'bad'); return; }
+  const v=clamp(S.staff[k]+delta, 0, d.max);
+  if(v!==S.staff[k]){ S.staff[k]=v; renderManage(); }
+}
+
+function runMarketing(){
+  if(S.level<4){ toast('Marketing unlocks at Level 4','bad'); return; }
+  if(S.gsec<S.mktUntil){ toast('A campaign is already running','bad'); return; }
+  if(S.cash<400){ toast('A campaign costs $400','bad'); return; }
+  S.cash-=400;
+  S.mktUntil=S.gsec+180;   // one full day of +50% demand
+  toast('📣 Marketing campaign launched — +50% demand for a day','good');
+  renderManage();
+}
+
+/* ---------------- rendering ---------------- */
+const cv=document.getElementById('cv');
+const ctx=cv.getContext('2d');
+const DPR=Math.min(window.devicePixelRatio||1,2);
+cv.width=W*TS*DPR; cv.height=H*TS*DPR;
+cv.style.aspectRatio=(W*TS)+'/'+(H*TS);
+ctx.scale(DPR,DPR);
+
+const EMOJI_FONT='px "Segoe UI Emoji","Noto Color Emoji","Apple Color Emoji",sans-serif';
+
+function draw(){
+  ctx.clearRect(0,0,W*TS,H*TS);
+
+  // floors
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const z=zone(x,y);
+    if(z.k==='track'){ drawTrackTile(x,y,z.lane); continue; }
+    const t=S.grid[y][x];
+    if(z.k==='plat'){
+      if(t.p){
+        ctx.fillStyle = ((x+y)%2)?'#3d4451':'#414957';
+        ctx.fillRect(x*TS,y*TS,TS,TS);
+        ctx.fillStyle='#c9a94a';                       // safety line by the track
+        ctx.fillRect(x*TS,y*TS+1,TS,3);
+      } else if(S.lanes[z.lane].owned){
+        ctx.fillStyle='#1d232d';                       // buildable gap
+        ctx.fillRect(x*TS,y*TS,TS,TS);
+        ctx.strokeStyle='#2a3341'; ctx.setLineDash([3,3]);
+        ctx.strokeRect(x*TS+2,y*TS+2,TS-4,TS-4); ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle='#161b23'; ctx.fillRect(x*TS,y*TS,TS,TS);
+      }
+      continue;
+    }
+    // concourse
+    const head = x>TRACK_END && y<=2*N_LANES-1;
+    ctx.fillStyle = head
+      ? (((x+y)%2)?'#262f3d':'#28313f')
+      : (((x+y)%2)?'#232b37':'#252d3a');
+    ctx.fillRect(x*TS,y*TS,TS,TS);
+  }
+
+  // entrance
+  ctx.fillStyle='#2e4d38';
+  ctx.fillRect(ENTR.x*TS,ENTR.y*TS,TS,TS);
+  ctx.font='20'+EMOJI_FONT; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('🚪',(ENTR.x+0.5)*TS,(ENTR.y+0.55)*TS);
+  ctx.font='bold 8px sans-serif'; ctx.fillStyle='#7fc98f';
+  ctx.fillText('ENTRANCE',(ENTR.x+0.5)*TS,(ENTR.y+0.08)*TS);
+
+  drawLockedLaneLabels();
+  drawTrains();
+
+  // buildings
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const t=S.grid[y][x];
+    if(!t.b) continue;
+    const d=B[t.b];
+    if(!d.small){
+      ctx.fillStyle='#323d4e';
+      ctx.strokeStyle='#4a5a70';
+      roundRect(x*TS+2,y*TS+2,TS-4,TS-4,5); ctx.fill(); ctx.stroke();
+    }
+    ctx.font='19'+EMOJI_FONT; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(d.e,(x+0.5)*TS,(y+0.55)*TS);
+  }
+
+  drawPax();
+  drawLaneLabels();
+  drawGhost();
+  drawNight();
+}
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+function drawTrackTile(x,y,lane){
+  const owned=S.lanes[lane].owned;
+  ctx.fillStyle=owned?'#20242c':'#181c23';
+  ctx.fillRect(x*TS,y*TS,TS,TS);
+  if(owned){
+    ctx.fillStyle='#3a3f49';                       // sleepers
+    for(let s=4;s<TS;s+=10) ctx.fillRect(x*TS+s,y*TS+7,4,TS-14);
+    ctx.fillStyle='#565e6b';                       // rails
+    ctx.fillRect(x*TS,y*TS+9,TS,3);
+    ctx.fillRect(x*TS,y*TS+TS-12,TS,3);
+    if(x===TRACK_END){                             // buffer stop
+      ctx.fillStyle='#8a2f36';
+      ctx.fillRect(x*TS+TS-8,y*TS+5,6,TS-10);
+      ctx.fillStyle='#d9d9d9';
+      ctx.fillRect(x*TS+TS-8,y*TS+13,6,4);
+    }
+  } else {
+    ctx.strokeStyle='#242a34'; ctx.setLineDash([5,5]);
+    ctx.beginPath(); ctx.moveTo(x*TS,y*TS+TS/2); ctx.lineTo(x*TS+TS,y*TS+TS/2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+function drawLockedLaneLabels(){
+  ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.fillStyle='#5d6979';
+  for(let i=0;i<N_LANES;i++){
+    if(S.lanes[i].owned) continue;
+    const y=i*2*TS;
+    const txt = S.level>=LANE_LVL[i]
+      ? '🔒 Track '+(i+1)+' — '+fmt$(LANE_COST[i])+' (Manage tab)'
+      : '🔒 Track '+(i+1)+' — unlocks at Level '+LANE_LVL[i];
+    ctx.fillText(txt, 9*TS, y+TS/2+4);
+  }
+}
+
+function drawLaneLabels(){
+  for(let i=0;i<N_LANES;i++){
+    const lane=S.lanes[i];
+    if(!lane.owned) continue;
+    const L=LINES[lane.line];
+    const y=i*2*TS;
+    ctx.fillStyle=L.color;
+    roundRect(3,y+3,64,13,4); ctx.fill();
+    ctx.fillStyle='#0d1117'; ctx.font='bold 9px sans-serif';
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.fillText('T'+(i+1)+' '+L.n.toUpperCase(), 8, y+10);
+  }
+}
+
+function drawTrains(){
+  for(let i=0;i<N_LANES;i++){
+    const lane=S.lanes[i], tr=lane.train;
+    if(!tr) continue;
+    const L=LINES[lane.line];
+    const y=i*2*TS;
+    const len=tr.cars*2*TS;
+    const stopX=(TRACK_END+0.85)*TS-len;   // nose against the buffer
+    let x;
+    if(tr.phase==='in'){
+      const f=1-Math.pow(1-Math.min(tr.t/TRAIN_IN,1),3);
+      x=-len+(stopX+len)*f;
+    } else if(tr.phase==='dwell'){ x=stopX; }
+    else {
+      const f=Math.pow(Math.min(tr.t/TRAIN_OUT,1),2);
+      x=stopX-(stopX+len)*f;
+    }
+    for(let c=0;c<tr.cars;c++){
+      const cx=x+c*2*TS;
+      ctx.fillStyle=L.color;
+      roundRect(cx+2,y+4,2*TS-4,TS-8,6); ctx.fill();
+      ctx.fillStyle='rgba(13,17,23,.55)';
+      for(let wnd=0;wnd<3;wnd++) ctx.fillRect(cx+9+wnd*18,y+9,11,7);
+      if(tr.phase==='dwell'){
+        ctx.fillStyle='#f2e14e';
+        ctx.fillRect(cx+TS-4,y+TS-9,8,4);   // open door marker
+      }
+    }
+    // headlight on the lead (right) car
+    ctx.fillStyle='#f2e9a0';
+    ctx.beginPath(); ctx.arc(x+len-5,y+TS/2,2.6,0,7); ctx.fill();
+  }
+}
+
+function drawPax(){
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(const p of PAX){
+    if(p.dead||p.st==='boarded') continue;
+    const sy=p.seat&&p.st==='wait' ? p.y-5 : p.y;
+    ctx.fillStyle=p.col;
+    ctx.beginPath(); ctx.arc(p.x,sy,4.2,0,7); ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,.4)'; ctx.lineWidth=1; ctx.stroke();
+    // a need bubble when something is urgent
+    const k=topNeed(p);
+    if(p.needs[k]>75 && (p.st==='wait'||p.st==='buying'||p.st==='decide')){
+      ctx.font='9'+EMOJI_FONT;
+      ctx.fillText(NEED_EMO[k],p.x,sy-9);
+    } else if(p.wt>p.pat && p.hap<40){
+      ctx.font='9'+EMOJI_FONT;
+      ctx.fillText('😠',p.x,sy-9);
+    }
+  }
+}
+
+function drawGhost(){
+  if(!hover) return;
+  const {x,y}=hover;
+  if(tool==='sell'){
+    const t=S.grid[y][x];
+    ctx.strokeStyle='#e5646c'; ctx.lineWidth=2;
+    ctx.strokeRect(x*TS+1,y*TS+1,TS-2,TS-2);
+    if(t.b||t.p){
+      ctx.font='11px sans-serif'; ctx.fillStyle='#e5646c'; ctx.textAlign='center';
+      const val=t.b?Math.floor(B[t.b].cost/2):Math.floor(B.platform.cost/2);
+      ctx.fillText('+'+fmt$(val), (x+0.5)*TS, y*TS-4>8?y*TS-4:y*TS+TS+9);
+    }
+    return;
+  }
+  if(!tool) return;
+  const d=B[tool];
+  const chk=canPlace(tool,x,y);
+  const ok=chk.ok&&S.cash>=d.cost;
+  if(d.aura){
+    ctx.fillStyle=ok?'rgba(95,208,104,.10)':'rgba(229,100,108,.08)';
+    ctx.beginPath();
+    ctx.rect((x-d.r)*TS,(y-d.r)*TS,(2*d.r+1)*TS,(2*d.r+1)*TS);
+    ctx.fill();
+  }
+  ctx.strokeStyle=ok?'#5fd068':'#e5646c'; ctx.lineWidth=2;
+  ctx.strokeRect(x*TS+1,y*TS+1,TS-2,TS-2);
+  ctx.globalAlpha=0.65;
+  ctx.font='19'+EMOJI_FONT; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(d.e,(x+0.5)*TS,(y+0.55)*TS);
+  ctx.globalAlpha=1;
+}
+
+function drawNight(){
+  const h=S.gmin/60;
+  let a=0;
+  if(h<5) a=0.32; else if(h<7) a=0.32*(7-h)/2;
+  else if(h>=20) a=Math.min(0.32,(h-20)*0.16);
+  if(a>0.01){
+    ctx.fillStyle='rgba(8,12,28,'+a.toFixed(3)+')';
+    ctx.fillRect(0,0,W*TS,H*TS);
+  }
+}
+
+/* ---------------- UI: toasts / log / modal ---------------- */
+const $=id=>document.getElementById(id);
+function toast(msg,cls){
+  const d=document.createElement('div');
+  d.className='toast '+(cls||''); d.textContent=msg;
+  $('toasts').appendChild(d);
+  setTimeout(()=>d.remove(),4500);
+  log(msg,cls);
+}
+function log(msg,cls){
+  const d=document.createElement('div');
+  if(cls)d.className=cls;
+  d.textContent=msg;
+  const el=$('log');
+  el.prepend(d);
+  while(el.children.length>24) el.lastChild.remove();
+}
+function showModal(title,html){
+  $('modal-title').innerHTML=title;
+  $('modal-body').innerHTML=html;
+  $('overlay').classList.add('show');
+}
+$('modal-close').onclick=()=>$('overlay').classList.remove('show');
+
+function levelUpModal(lvl){
+  const items=Object.entries(B).filter(([,d])=>d.lvl===lvl).map(([,d])=>d.e+' '+d.n);
+  for(let i=0;i<N_LANES;i++) if(LANE_LVL[i]===lvl) items.push('🛤️ Track '+(i+1)+' available');
+  for(const [,L] of Object.entries(LINES)) if(L.lvl===lvl) items.push('🚆 '+L.n+' line contracts');
+  for(const [,st] of Object.entries(STAFF)) if(st.lvl===lvl) items.push(st.e+' '+st.n+'s for hire');
+  if(lvl===4) items.push('📣 Marketing campaigns');
+  showModal('🎉 Level '+lvl+'!',
+    '<p>Your station is growing. Newly unlocked:</p>'+
+    (items.length?'<ul>'+items.map(i=>'<li>'+i+'</li>').join('')+'</ul>'
+                 :'<p>Prestige — and bigger crowds.</p>'));
+  toast('⬆️ Level '+lvl+' reached!','gold');
+}
+
+function helpModal(){
+  showModal('❓ How to run a terminus',
+    '<p><b>The loop:</b> passengers enter at the 🚪 door, buy a 🎫 ticket, walk to a '+
+    'platform and board the next train. Every boarding pays a fare.</p>'+
+    '<p><b>Amenities:</b> waiting people get hungry, thirsty, bored… build shops and they '+
+    'will spend money in your station. Happy passengers raise your ⭐ reputation, which '+
+    'brings bigger crowds.</p>'+
+    '<p><b>Grow:</b> serving people earns XP. Level up to unlock more shops, extra tracks, '+
+    'faster line contracts, staff and marketing. Longer platforms fit longer trains.</p>'+
+    '<p><b>Watch out for:</b> queues at ticket machines, full trains, a dirty station and '+
+    'greedy fares — all of it turns passengers sour. Buildings cost upkeep every day.</p>'+
+    '<p><kbd>Space</kbd> pause · <kbd>Esc</kbd> cancel tool · right-click also cancels</p>');
+}
+
+/* ---------------- UI: build palette ---------------- */
+function buildPalette(){
+  const root=$('panel-build');
+  root.innerHTML='';
+  const sell=document.createElement('div');
+  sell.className='cards';
+  sell.innerHTML='<div class="card tool-sell" id="card-sell"><span class="e">🧨</span>'+
+    '<div class="n">Demolish</div><div class="c">refund 50%</div></div>';
+  root.appendChild(sell);
+  for(const cat of CATS){
+    const h=document.createElement('div'); h.className='cat'; h.textContent=cat;
+    root.appendChild(h);
+    const grid=document.createElement('div'); grid.className='cards';
+    for(const [id,d] of Object.entries(B)){
+      if(d.cat!==cat) continue;
+      const locked=S.level<d.lvl;
+      const c=document.createElement('div');
+      c.className='card'+(locked?' locked':'')+(tool===id?' sel':'');
+      c.dataset.id=id;
+      c.innerHTML='<span class="e">'+d.e+'</span>'+(locked?'<span class="lock">Lv '+d.lvl+'</span>':'')+
+        '<div class="n">'+d.n+'</div><div class="c">'+fmt$(d.cost)+
+        (d.up?' · '+fmt$(d.up)+'/day':'')+'</div>';
+      c.onmouseenter=e=>showTip(e,d.n,d.d+(d.serves?' Earns '+fmt$(d.price)+' per customer.':'')
+        +(locked?' (Unlocks at level '+d.lvl+')':''));
+      c.onmousemove=moveTip; c.onmouseleave=hideTip;
+      c.onclick=()=>{
+        if(S.level<d.lvl){ toast(d.n+' unlocks at Level '+d.lvl,'bad'); return; }
+        tool = tool===id?null:id;
+        buildPalette();
+      };
+      grid.appendChild(c);
+    }
+    root.appendChild(grid);
+  }
+  const sc=$('card-sell');
+  if(tool==='sell') sc.classList.add('sel');
+  sc.onclick=()=>{ tool = tool==='sell'?null:'sell'; buildPalette(); };
+}
+
+/* ---------------- UI: manage panel ---------------- */
+function renderManage(){
+  const root=$('panel-manage');
+  if(!root) return;
+  let h='';
+  h+='<div class="cat">Fares</div>';
+  h+='<div class="mrow" style="display:block">'+
+     '<div class="t">Fare level: <b id="fareval">'+Math.round(S.fare*100)+'%</b></div>'+
+     '<input type="range" id="fareslider" min="60" max="180" step="10" value="'+Math.round(S.fare*100)+'">'+
+     '<div class="s">Higher fares earn more per rider but scare passengers off and sour the mood.</div></div>';
+
+  h+='<div class="cat">Tracks &amp; Lines</div>';
+  for(let i=0;i<N_LANES;i++){
+    const lane=S.lanes[i];
+    if(lane.owned){
+      const L=LINES[lane.line];
+      h+='<div class="lanecard"><div class="hd"><span><span class="dot" style="background:'+L.color+'"></span>'+
+         'Track '+(i+1)+' — '+L.n+'</span><span id="lane-eta-'+i+'" class="s"></span></div>'+
+         '<div class="sub">Platform: '+IDX.plat[i]+' tiles → '+
+         clamp(Math.floor(IDX.plat[i]/2),1,L.maxCars)+' car(s) · fare '+fmt$(L.fare*S.fare)+
+         ' · every ~'+L.period+'s</div><div class="linebtns">';
+      for(const [key,LL] of Object.entries(LINES)){
+        const cur=lane.line===key;
+        h+='<button data-lane="'+i+'" data-line="'+key+'" '+(cur?'class="on" disabled':'')+'>'+
+           LL.n+(LL.cost&&!cur?' '+fmt$(LL.cost):'')+(S.level<LL.lvl?' 🔒'+LL.lvl:'')+'</button>';
+      }
+      h+='</div></div>';
+    } else {
+      h+='<div class="lanecard"><div class="hd"><span>🔒 Track '+(i+1)+'</span></div>'+
+         '<div class="sub">'+(S.level<LANE_LVL[i]?'Unlocks at Level '+LANE_LVL[i]
+           :'Opens a new line into your station')+'</div>'+
+         '<div class="linebtns"><button data-buylane="'+i+'" '+(S.level<LANE_LVL[i]?'disabled':'')+'>'+
+         'Buy — '+fmt$(LANE_COST[i])+'</button></div></div>';
+    }
+  }
+
+  h+='<div class="cat">Staff</div>';
+  for(const [k,d] of Object.entries(STAFF)){
+    const locked=S.level<d.lvl;
+    h+='<div class="mrow"><div><div class="t">'+d.e+' '+d.n+(locked?' <span class="s">🔒 Lv '+d.lvl+'</span>':'')+
+       '</div><div class="s">'+d.d+' '+fmt$(d.wage)+'/day each</div></div>'+
+       '<div class="ctl"><button data-staff="'+k+'" data-d="-1" '+(locked?'disabled':'')+'>−</button>'+
+       '<b>'+S.staff[k]+'</b><button data-staff="'+k+'" data-d="1" '+(locked?'disabled':'')+'>+</button></div></div>';
+  }
+
+  h+='<div class="cat">Promotion</div>';
+  const mktOn=S.gsec<S.mktUntil;
+  h+='<div class="mrow"><div><div class="t">📣 Marketing campaign</div>'+
+     '<div class="s">+50% demand for one day — $400'+(S.level<4?' · 🔒 Lv 4':'')+'</div></div>'+
+     '<button id="mktbtn" '+(mktOn||S.level<4?'disabled':'')+'>'+(mktOn?'Running…':'Launch')+'</button></div>';
+
+  h+='<div class="cat">Today</div>';
+  h+='<div class="mrow" style="display:block" id="todaystats"></div>';
+  root.innerHTML=h;
+
+  $('fareslider').oninput=e=>{
+    S.fare=(+e.target.value)/100;
+    $('fareval').textContent=Math.round(S.fare*100)+'%';
+  };
+  $('fareslider').onchange=()=>renderManage();
+  root.querySelectorAll('[data-buylane]').forEach(b=>b.onclick=()=>buyLane(+b.dataset.buylane));
+  root.querySelectorAll('[data-line]').forEach(b=>b.onclick=()=>setLine(+b.dataset.lane,b.dataset.line));
+  root.querySelectorAll('[data-staff]').forEach(b=>b.onclick=()=>hireStaff(b.dataset.staff,+b.dataset.d));
+  const mb=$('mktbtn'); if(mb) mb.onclick=runMarketing;
+  updateManageLive();
+}
+
+function updateManageLive(){
+  if($('panel-manage').style.display==='none') return;
+  for(let i=0;i<N_LANES;i++){
+    const el=$('lane-eta-'+i);
+    if(!el) continue;
+    const lane=S.lanes[i];
+    el.textContent = lane.train ? '🚆 at platform'
+      : 'next train '+Math.max(0,Math.ceil(lane.nextT-S.gsec))+'s';
+  }
+  const ts=$('todaystats');
+  if(ts){
+    const st=S.stats;
+    ts.innerHTML='<div class="s">Boarded: <b>'+st.boardToday+'</b> · Arrived: <b>'+st.arrToday+
+      '</b><br>Ticket revenue: <b>'+fmt$(st.tickRevToday||0)+'</b> · Shops: <b>'+fmt$(st.amenToday)+
+      '</b><br>Daily upkeep due: <b>'+fmt$(IDX.upkeep+wagesTotal())+'</b> · Visitors in station: <b>'+
+      PAX.length+'</b></div>';
+  }
+}
+
+/* ---------------- UI: tabs / tooltip / topbar ---------------- */
+$('tab-build').onclick=()=>{
+  $('tab-build').classList.add('on'); $('tab-manage').classList.remove('on');
+  $('panel-build').style.display=''; $('panel-manage').style.display='none';
+};
+$('tab-manage').onclick=()=>{
+  $('tab-manage').classList.add('on'); $('tab-build').classList.remove('on');
+  $('panel-manage').style.display=''; $('panel-build').style.display='none';
+  renderManage();
+};
+
+const tip=$('tip');
+function showTip(e,title,body){
+  tip.innerHTML='<div class="tt">'+title+'</div><div class="td">'+body+'</div>';
+  tip.style.display='block'; moveTip(e);
+}
+function moveTip(e){
+  const pad=14;
+  let x=e.clientX+pad, y=e.clientY+pad;
+  if(x+270>innerWidth) x=e.clientX-270;
+  if(y+80>innerHeight) y=e.clientY-80;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+}
+function hideTip(){ tip.style.display='none'; }
+
+function renderGoal(){
+  const g=GOALS[S.goalIdx];
+  if(g){
+    $('goal-title').textContent='🏁 Goal '+(S.goalIdx+1)+'/'+GOALS.length+': '+g.t;
+    $('goal-desc').textContent=g.d;
+    $('goal-reward').textContent='Reward: '+fmt$(g.r)+' + '+g.xp+' XP';
+  } else {
+    $('goal-title').textContent='🏆 Grand Terminus achieved';
+    $('goal-desc').textContent='All goals complete. The station is yours — grow it forever.';
+    $('goal-reward').textContent='';
+  }
+}
+
+function renderTopbar(){
+  const c=$('cash');
+  c.textContent=fmt$(S.cash);
+  c.classList.toggle('neg',S.cash<0);
+  const stars='★'.repeat(Math.round(S.rep/20))+'☆'.repeat(5-Math.round(S.rep/20));
+  $('rep').textContent=stars+' '+Math.round(S.rep);
+  $('clean').textContent=Math.round(S.clean)+'%';
+  const hh=String(Math.floor(S.gmin/60)%24).padStart(2,'0');
+  const mm=String(Math.floor(S.gmin%60)).padStart(2,'0');
+  $('clock').textContent='Day '+S.day+' '+hh+':'+mm;
+  const prev=TH[S.level-1], next=TH[S.level]||TH[MAX_LVL-1];
+  const f=S.level>=MAX_LVL?1:clamp((S.xp-prev)/(next-prev),0,1);
+  $('xpfill').style.width=(f*100)+'%';
+  $('xplbl').textContent='Level '+S.level+(S.level>=MAX_LVL?' (max)':' · '+S.xp+'/'+next+' XP');
+}
+
+/* speed buttons */
+const SPEEDS=[0,1,2.5,5];
+function setSpeed(i){
+  if(i===0){ S.paused=true; }
+  else { S.paused=false; S.speed=SPEEDS[i]; }
+  for(let k=0;k<4;k++) $('sp'+k).classList.toggle('on',k===i);
+}
+$('sp0').onclick=()=>setSpeed(0);
+$('sp1').onclick=()=>setSpeed(1);
+$('sp2').onclick=()=>setSpeed(2);
+$('sp3').onclick=()=>setSpeed(3);
+$('helpbtn').onclick=helpModal;
+$('savebtn').onclick=()=>{ save(); toast('💾 Game saved',''); };
+$('resetbtn').onclick=()=>{
+  if(confirm('Start a brand new station? Your current save will be erased.')){
+    localStorage.removeItem(SAVE_KEY);
+    location.reload();
+  }
+};
+
+/* ---------------- canvas input ---------------- */
+function canvasTile(e){
+  const r=cv.getBoundingClientRect();
+  const x=Math.floor((e.clientX-r.left)*(W*TS/r.width)/TS);
+  const y=Math.floor((e.clientY-r.top)*(H*TS/r.height)/TS);
+  if(x<0||y<0||x>=W||y>=H) return null;
+  return {x,y};
+}
+let painting=false;
+cv.addEventListener('mousemove',e=>{
+  hover=canvasTile(e);
+  if(hover&&!tool){
+    const t=S.grid[hover.y][hover.x], z=zone(hover.x,hover.y);
+    if(t.b){ const d=B[t.b];
+      showTip(e,d.e+' '+d.n,d.d+' Upkeep '+fmt$(d.up)+'/day. Demolish 🧨 refunds '+fmt$(Math.floor(d.cost/2))+'.');
+    } else if(z.k==='track'){
+      const lane=S.lanes[z.lane];
+      showTip(e,'Track '+(z.lane+1), lane.owned?LINES[lane.line].n+' service. Manage lines in the 📋 tab.'
+        :'Not yours yet — buy it in the 📋 Manage tab.');
+    } else if(z.k==='plat'&&t.p){ showTip(e,'Platform','Passengers wait here to board. Add benches!'); }
+    else hideTip();
+  } else hideTip();
+  if(painting&&tool==='platform'&&hover) place('platform',hover.x,hover.y);
+});
+cv.addEventListener('mouseleave',()=>{hover=null;hideTip();});
+cv.addEventListener('mousedown',e=>{
+  if(e.button!==0){ tool=null; buildPalette(); return; }
+  const t=canvasTile(e);
+  if(!t) return;
+  if(tool==='sell'){ demolish(t.x,t.y); return; }
+  if(tool){
+    const ok=place(tool,t.x,t.y);
+    if(ok&&tool==='platform') painting=true;
+    if(ok&&!e.shiftKey&&tool!=='platform'&&tool!=='bench'&&tool!=='plant'){
+      // keep the tool for spammy items; drop it for one-off buildings
+      tool=null; buildPalette();
+    }
+  }
+});
+addEventListener('mouseup',()=>painting=false);
+cv.addEventListener('contextmenu',e=>{e.preventDefault(); tool=null; buildPalette();});
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ tool=null; buildPalette(); $('overlay').classList.remove('show'); }
+  if(e.key===' '&&e.target===document.body){
+    e.preventDefault();
+    setSpeed(S.paused?1:0);
+  }
+});
+
+/* ---------------- main loop ---------------- */
+let lastT=performance.now(), liveCd=0, saveCd=0;
+function frame(now){
+  let dt=Math.min((now-lastT)/1000,0.1);
+  lastT=now;
+  if(!S.paused&&!S.over){
+    const gdt=dt*S.speed;
+    updateClock(gdt);
+    updateSpawn(gdt);
+    updatePax(gdt);
+    updateTrains(gdt);
+    updateGoals(gdt);
+    hourTick();
+  }
+  draw();
+  renderTopbar();
+  liveCd-=dt;
+  if(liveCd<=0){ liveCd=1; updateManageLive(); }
+  saveCd+=dt;
+  if(saveCd>25&&!S.over){ saveCd=0; save(); }
+  requestAnimationFrame(frame);
+}
+
+/* ---------------- boot ---------------- */
+const hadSave=load();
+if(!hadSave){
+  newGame();
+  showModal('🚉 Welcome to Terminus',
+    '<p>You have inherited a sleepy one-track terminus. Make it grand.</p>'+
+    '<p>🚶 Passengers enter at the <b>door</b> (bottom right), buy a <b>🎫 ticket</b>, '+
+    'then wait on the <b>platform</b> for the next train. Each boarding pays you a fare.</p>'+
+    '<p>🔨 Start simple: place a few <b>benches</b>, keep the queue moving, and follow the '+
+    '<b>goals</b> under the map. Serving people earns XP — levels unlock shops, tracks, '+
+    'express lines, staff and more.</p>'+
+    '<p>💡 Waiting passengers get hungry, thirsty and bored. Amenities turn that into profit.</p>');
+}
+buildPalette();
+renderManage();
+renderGoal();
+window.addEventListener('beforeunload',()=>{ if(!S.over) save(); });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
