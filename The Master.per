@@ -19,6 +19,10 @@
 ;    unlimited drop distances, wheelbarrow imperial fallback, age timestamps in debug.
 ;  NO ESCROW by design (v0.8 lesson) — Sol's Castle escrow bug (blocked villagers,
 ;  idle TCs) is exactly the trap this architecture eliminates.
+; v2.1 — from the Panda Tutorial AI (Rehoboam's author): AGE-BANK FINISHER — when the
+;  stockpile is within one carried load of the age cost, force-drop food so the age-up
+;  clicks the moment the economy has it (saves 10-20s on EVERY age). Also split camp
+;  distances: lumber camps stay tight, mining camps may reach farther (new deposits).
 ;
 ; v1.0 — architecture + the v0.9 review:
 ;  * AGE-UP now sits ABOVE villager production: rule-order gives it the TC first, so
@@ -41,7 +45,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.0 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.1 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -169,6 +173,8 @@
 	(set-strategic-number sn-maximum-gold-drop-distance 30)
 	(set-strategic-number sn-maximum-stone-drop-distance 30)
 	(set-strategic-number sn-camp-max-distance 16)
+	(set-strategic-number sn-lumber-camp-max-distance 15)  ; LCs stay tight to the woodline
+	(set-strategic-number sn-mining-camp-max-distance 20)  ; mines may reach a bit farther
 	(set-strategic-number sn-mill-max-distance 22)
 	(set-strategic-number sn-allow-adjacent-dropsites 1)
 	(set-strategic-number sn-town-center-placement lumber-camp)   ; TCs near woods
@@ -228,6 +234,34 @@
 	(food-amount < 50)
 =>
 	(up-drop-resources food c: 5)
+)
+
+; AGE-BANK FINISHER (Panda's trick, simplified): the stockpile is within ~one carried
+; load of the age cost -> force-drop what villagers hold so the click fires NOW.
+(defrule
+	(current-age == dark-age)
+	(civilian-population >= 21)
+	(food-amount >= 440)
+	(food-amount < 500)
+=>
+	(up-drop-resources food c: 1)
+)
+(defrule
+	(current-age == feudal-age)
+	(food-amount >= 740)
+	(food-amount < 800)
+	(gold-amount >= 200)
+=>
+	(up-drop-resources food c: 1)
+)
+(defrule
+	(current-age == castle-age)
+	(food-amount >= 940)
+	(food-amount < 1000)
+	(gold-amount >= 800)
+	(military-population >= 12)
+=>
+	(up-drop-resources food c: 1)
 )
 ;endregion
 
@@ -431,9 +465,9 @@
 
 ; Camps may reach farther as the map opens up (crowded/exhausted deposits -> new mines).
 (defrule (current-age == castle-age)(strategic-number sn-camp-max-distance < 22)
-=> (set-strategic-number sn-camp-max-distance 22))
+=> (set-strategic-number sn-camp-max-distance 22)(set-strategic-number sn-mining-camp-max-distance 26))
 (defrule (current-age == imperial-age)(strategic-number sn-camp-max-distance < 28)
-=> (set-strategic-number sn-camp-max-distance 28))
+=> (set-strategic-number sn-camp-max-distance 28)(set-strategic-number sn-mining-camp-max-distance 34))
 ; Imperial: no drop-distance caps — gather wherever resources remain (Sol's idea).
 (defrule
 	(current-age == imperial-age)
