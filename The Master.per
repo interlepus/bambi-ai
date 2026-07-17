@@ -1,8 +1,15 @@
 ;==================================================================================
-; THE MASTER - v1.0
+; THE MASTER - v1.1
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
+;
+; v1.1 — the Scout Rush now actually RUSHES (v1.0 trained scouts but the only attack
+;  trigger was 8 knights in Castle Age): offense priorities target the enemy ECONOMY
+;  (houses/mills/camps, towers ignored) and waves launch on a 40s cadence, deactivating
+;  vs massed spears or Castle Age (pattern proven in Bambi + Rehoboam). Also: 2nd house
+;  at the start; Feudal spearmen vs enemy scout raids (spears are anti-cavalry only);
+;  Squires + infantry armour gated on owning axemen/spears.
 ;
 ; v1.0 — architecture + the v0.9 review:
 ;  * AGE-UP now sits ABOVE villager production: rule-order gives it the TC first, so
@@ -25,7 +32,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v1.0 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v1.1 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -42,6 +49,9 @@
 (defconst gl-town-size-step 7)
 (defconst gl-plan 8)               ; 0 undecided, 1 = scout rush, 2 = fast castle
 (defconst gl-boar-state 10)        ; 0 idle, 1 luring with 1, 2 swarming with 6
+(defconst gl-scrush 11)            ; 0 idle, 1 armed, 2 raiding, 3 done/off
+
+(defconst priority-offense 0)      ; for up-reset-target-priorities
 
 (defconst timer-debug 1)
 (defconst timer-attack 2)
@@ -58,6 +68,7 @@
 	(set-goal gl-town-size-step 0)
 	(set-goal gl-plan 0)
 	(set-goal gl-boar-state 0)
+	(set-goal gl-scrush 0)
 	(disable-self)
 )
 (defrule (true) => (enable-timer timer-debug 20) (disable-self))
@@ -344,6 +355,13 @@
 	(up-pending-objects c: house == 0)
 => (up-assign-builders c: house c: 2)(build house))
 (defrule (building-type-count-total house > 0) => (up-assign-builders c: house c: 1)(disable-self))
+; 2nd house immediately after the 1st (2 houses at the start = housed through Dark Age).
+(defrule
+	(current-age == dark-age)
+	(building-type-count-total house == 1)
+	(can-build house)
+	(up-pending-objects c: house < 2)
+=> (build house))
 (defrule (current-age <= feudal-age)(housing-headroom < 6)(population-headroom > 0)(up-pending-objects c: house < 2)(can-build house) => (build house))
 (defrule (current-age == castle-age)(housing-headroom < 12)(population-headroom > 0)(up-pending-objects c: house < 3)(can-build house) => (build house))
 (defrule (current-age == imperial-age)(housing-headroom < 18)(population-headroom > 0)(up-pending-objects c: house < 5)(can-build house) => (build house))
@@ -456,6 +474,81 @@
 => (set-goal gl-plan 2)(chat-to-player my-player-number "[MASTER] Plan: FAST CASTLE (enemy reached Feudal first)"))
 ;endregion
 
+;region SCOUT RUSH EXECUTION (the rush actually rushes) ===========================
+; Arm: raid the enemy ECONOMY — houses/mills/camps first, ignore towers (don't suicide
+; into TC/tower fire). Same priority pattern Bambi and Rehoboam use.
+(defrule
+	(goal gl-plan 1)
+	(goal gl-scrush 0)
+	(current-age == feudal-age)
+=>
+	(up-reset-target-priorities priority-offense 1)
+	(up-set-offense-priority c: house c: 5)
+	(up-set-offense-priority c: archery-range c: 6)
+	(up-set-offense-priority c: stable c: 7)
+	(up-set-offense-priority c: barracks c: 8)
+	(up-set-offense-priority c: mill c: 9)
+	(up-set-offense-priority c: mining-camp c: 10)
+	(up-set-offense-priority c: lumber-camp c: 11)
+	(set-strategic-number sn-disable-tower-priority 1)
+	(set-goal gl-scrush 1)
+)
+
+; Launch the first wave at 5 scouts while the window is open (enemy Feudal, no spear mass).
+(defrule
+	(goal gl-scrush 1)
+	(unit-type-count scout-cavalry-line >= 5)
+	(players-unit-type-count any-enemy spearman-line < 2)
+	(not (players-current-age any-enemy >= castle-age))
+	(not (town-under-attack))
+=>
+	(set-strategic-number sn-number-attack-groups 100)
+	(attack-now)
+	(disable-timer timer-attack)
+	(enable-timer timer-attack 40)
+	(set-goal gl-scrush 2)
+	(chat-to-player my-player-number "[MASTER] SCOUT RUSH: raiding enemy eco")
+)
+
+; Keep the waves flowing while raiding.
+(defrule
+	(goal gl-scrush 2)
+	(timer-triggered timer-attack)
+	(military-population >= 4)
+	(not (town-under-attack))
+=>
+	(attack-now)
+	(disable-timer timer-attack)
+	(enable-timer timer-attack 40)
+)
+
+; Reinforce a working rush up to ~9 scouts.
+(defrule
+	(goal gl-scrush 2)
+	(current-age == feudal-age)
+	(food-amount > 150)
+	(players-unit-type-count any-enemy spearman-line < 2)
+	(can-train scout-cavalry-line)
+	(unit-type-count-total scout-cavalry-line < 9)
+=> (train scout-cavalry-line))
+
+; Call it off when countered (spear mass) or the game moves on (either side Castle).
+(defrule
+	(or (goal gl-scrush 1) (goal gl-scrush 2))
+	(or
+		(players-unit-type-count any-enemy spearman-line >= 3)
+		(or (players-current-age any-enemy >= castle-age) (current-age >= castle-age))
+	)
+=>
+	(up-reset-target-priorities priority-offense 0)
+	(set-strategic-number sn-disable-tower-priority 0)
+	(set-strategic-number sn-number-attack-groups 0)
+	(disable-timer timer-attack)
+	(set-goal gl-scrush 3)
+	(chat-to-player my-player-number "[MASTER] Scout rush off -> transitioning to Knights")
+)
+;endregion
+
 ;region RESEARCH: ECONOMY ==========================================================
 (defrule
 	(or (food-amount < 45) (or (civilian-population >= 20) (or (town-under-attack) (up-enemy-units-in-town > 0))))
@@ -495,6 +588,11 @@
 ; Archer armour — ONLY if we own skirms/archers.
 (defrule (or (unit-type-count-total skirmisher-line > 0) (unit-type-count-total archer-line > 0)) (can-research ri-padded-archer-armor) => (research ri-padded-archer-armor))
 (defrule (or (unit-type-count-total skirmisher-line > 0) (unit-type-count-total archer-line > 0)) (can-research ri-leather-archer-armor) => (research ri-leather-archer-armor))
+; Infantry techs — ONLY if we own axemen/spearmen.
+(defrule (unit-type-count-total throwing-axeman-line > 0)(can-research ri-squires) => (research ri-squires))
+(defrule (or (unit-type-count-total throwing-axeman-line > 0) (unit-type-count-total spearman-line > 0)) (can-research ri-scale-mail) => (research ri-scale-mail))
+(defrule (research-completed ri-scale-mail)(can-research ri-chain-mail) => (research ri-chain-mail))
+(defrule (research-completed ri-chain-mail)(can-research ri-plate-mail) => (research ri-plate-mail))
 ;endregion
 
 ;region RESEARCH: UNIT LINES (gate upgrades on owning the unit) ====================
@@ -552,6 +650,14 @@
 	(can-train scout-cavalry-line)
 	(unit-type-count-total scout-cavalry-line < 5)
 => (train scout-cavalry-line))
+; Feudal spearmen vs enemy SCOUT raids (spears are anti-cavalry — their only good matchup).
+(defrule
+	(current-age == feudal-age)
+	(players-unit-type-count any-enemy scout-cavalry-line >= 3)
+	(building-type-count barracks > 0)
+	(can-train spearman-line)
+	(unit-type-count-total spearman-line < 5)
+=> (train spearman-line))
 ;endregion
 
 ;region MILITARY: KNIGHTS (core) ==================================================
