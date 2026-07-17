@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.0
+; THE MASTER - v2.2
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -45,7 +45,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.1 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.2 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -617,14 +617,14 @@
 (defrule
 	(building-type-count monastery > 0)
 	(can-train monk)
-	(unit-type-count-total monks < 3)
+	(unit-type-count-total monk < 3)
 => (train monk))
 ; Extra monks vs massed enemy knights (conversion defence).
 (defrule
 	(goal gl-enemy-cavalry on)
 	(building-type-count monastery > 0)
 	(can-train monk)
-	(unit-type-count-total monks < 5)
+	(unit-type-count-total monk < 5)
 => (train monk))
 ; Pikemen vs enemy knight mass (anti-cavalry — their one good matchup).
 (defrule
