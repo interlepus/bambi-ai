@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.2
+; THE MASTER - v2.3
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -45,7 +45,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.2 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.3 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -228,6 +228,43 @@
 )
 ;endregion
 
+;region CASTLE BOOM: EXTRA TCs then MONASTERY — TOP PRIORITY ======================
+; Rule order = resource priority: these sit ABOVE every other building so the boom
+; (villager capacity!) gets the wood/stone first. Market/university wait their turn.
+(defrule
+	(current-age >= castle-age)
+	(building-type-count-total town-center < 3)
+	(can-build town-center)
+	(up-pending-objects c: town-center < 1)
+	(civilian-population > 24)
+	(up-compare-goal gl-home-threat < 6)
+=> (up-assign-builders c: town-center c: 3)(build town-center))
+
+; Monastery right after the 2nd TC -> monk -> relic gold trickle.
+(defrule
+	(current-age >= castle-age)
+	(or
+		(building-type-count-total town-center >= 2)
+		(or (goal gl-enemy-cavalry on) (and (food-amount > 900) (gold-amount > 700)))
+	)
+	(building-type-count-total monastery < 1)
+	(can-build monastery)
+	(up-pending-objects c: monastery < 1)
+=> (build monastery))
+(defrule
+	(building-type-count monastery > 0)
+	(can-train monk)
+	(unit-type-count-total monk < 3)
+=> (train monk))
+; Extra monks vs massed enemy knights (conversion defence).
+(defrule
+	(goal gl-enemy-cavalry on)
+	(building-type-count monastery > 0)
+	(can-train monk)
+	(unit-type-count-total monk < 5)
+=> (train monk))
+;endregion
+
 ;region ANTI-IDLE: KEEP THE TC FED ================================================
 (defrule
 	(current-age <= feudal-age)
@@ -400,11 +437,24 @@
 (defrule
 	(current-age == feudal-age)
 	(goal gl-plan 1)
+	(not (goal gl-scrush 3))
 	(not (up-research-status c: castle-age c:>= research-pending))
 =>
 	(set-strategic-number sn-food-gatherer-percentage 52)
 	(set-strategic-number sn-wood-gatherer-percentage 43)
 	(set-strategic-number sn-gold-gatherer-percentage 5)
+	(set-strategic-number sn-stone-gatherer-percentage 0)
+)
+; RUSH OVER -> stop buying scouts (90f each!), bank food+gold and CLICK CASTLE.
+(defrule
+	(current-age == feudal-age)
+	(goal gl-plan 1)
+	(goal gl-scrush 3)
+	(not (up-research-status c: castle-age c:>= research-pending))
+=>
+	(set-strategic-number sn-food-gatherer-percentage 58)
+	(set-strategic-number sn-wood-gatherer-percentage 28)
+	(set-strategic-number sn-gold-gatherer-percentage 14)
 	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
 ; FEUDAL - FAST CASTLE: food to bank the 800, ~2 vils gold, rest wood (we were short).
@@ -533,8 +583,11 @@
 	(up-pending-objects c: mill < 1)
 => (build mill))
 
+; Gold camp only AFTER stable+blacksmith exist: scouts cost no gold — gold is for
+; blacksmith techs and the Castle click, well into Feudal (barracks first!).
 (defrule
-	(or (up-research-status c: feudal-age c:>= research-pending) (current-age >= feudal-age))
+	(current-age >= feudal-age)
+	(building-type-count-total stable > 0)
 	(dropsite-min-distance gold > 5)
 	(resource-found gold)
 	(up-pending-objects c: mining-camp < 1)
@@ -572,19 +625,19 @@
 	(can-build archery-range)
 	(up-pending-objects c: archery-range < 1)
 => (build archery-range))
-; 2nd Archery Range vs heavy ranged (need skirm volume).
+; 2nd Archery Range as soon as we're actually being archer-attacked (skirm VOLUME).
 (defrule
 	(goal gl-enemy-ranged on)
-	(current-age >= castle-age)
-	(players-unit-type-count any-enemy archer-line >= 12)
+	(current-age >= feudal-age)
+	(or (players-unit-type-count any-enemy archer-line >= 8) (up-compare-goal gl-home-threat >= 3))
 	(building-type-count-total archery-range < 2)
 	(can-build archery-range)
 	(up-pending-objects c: archery-range < 1)
 => (build archery-range))
 
-; Market deferred to Castle (used for buy-stone) — no wasted Feudal wood.
-(defrule (current-age >= castle-age)(building-type-count-total market < 1)(can-build market)(up-pending-objects c: market < 1)(wood-amount > 175) => (build market))
-(defrule (current-age >= castle-age)(building-type-count-total university < 1)(can-build university)(up-pending-objects c: university < 1)(wood-amount > 200) => (build university))
+; Market/University wait for the BOOM (2nd/3rd TC first — they were stealing its wood).
+(defrule (current-age >= castle-age)(building-type-count-total town-center >= 2)(building-type-count-total market < 1)(can-build market)(up-pending-objects c: market < 1)(wood-amount > 175) => (build market))
+(defrule (current-age >= castle-age)(building-type-count-total town-center >= 3)(building-type-count-total university < 1)(can-build university)(up-pending-objects c: university < 1)(wood-amount > 200) => (build university))
 (defrule (current-age >= castle-age)(building-type-count-total siege-workshop < 1)(can-build siege-workshop)(up-pending-objects c: siege-workshop < 1)(military-population > 8) => (build siege-workshop))
 
 (defrule (current-age >= castle-age)(building-type-count-total castle < 1)(can-build castle)(up-pending-objects c: castle < 1) => (build castle))
@@ -592,40 +645,7 @@
 (defrule (current-age >= castle-age)(building-type-count-total castle < 2)(stone-amount > 650)(can-build castle)(up-pending-objects c: castle < 1) => (build castle))
 ;endregion
 
-;region BUILDINGS: TOWN CENTERS + MONASTERY (relics) ==============================
-(defrule
-	(current-age >= castle-age)
-	(building-type-count-total town-center < 3)
-	(can-build town-center)
-	(up-pending-objects c: town-center < 1)
-	(civilian-population > 28)
-	(up-compare-goal gl-home-threat < 6)
-=> (up-assign-builders c: town-center c: 3)(build town-center))
-
-; Monastery: for relic gold at 3 TCs, EARLY vs enemy knights (conversions), or as the
-; 2nd Castle-Age building when the bank is Imperial-ready (imp needs 2 of them!).
-(defrule
-	(current-age >= castle-age)
-	(or
-		(building-type-count-total town-center >= 3)
-		(or (goal gl-enemy-cavalry on) (and (food-amount > 900) (gold-amount > 700)))
-	)
-	(building-type-count-total monastery < 1)
-	(can-build monastery)
-	(up-pending-objects c: monastery < 1)
-=> (build monastery))
-(defrule
-	(building-type-count monastery > 0)
-	(can-train monk)
-	(unit-type-count-total monk < 3)
-=> (train monk))
-; Extra monks vs massed enemy knights (conversion defence).
-(defrule
-	(goal gl-enemy-cavalry on)
-	(building-type-count monastery > 0)
-	(can-train monk)
-	(unit-type-count-total monk < 5)
-=> (train monk))
+;region ANTI-CAVALRY EXTRAS =======================================================
 ; Pikemen vs enemy knight mass (anti-cavalry — their one good matchup).
 (defrule
 	(goal gl-enemy-cavalry on)
@@ -786,7 +806,11 @@
 (defrule (town-under-attack)(can-research ri-fletching) => (research ri-fletching))
 (defrule (or (unit-type-count-total skirmisher-line > 0) (unit-type-count-total archer-line > 0))(can-research ri-bodkin-arrow) => (research ri-bodkin-arrow))
 (defrule (can-research ri-masonry)        => (research ri-masonry))
-(defrule (can-research ri-murder-holes)   => (research ri-murder-holes))
+; Murder Holes only when we actually OWN fortifications (useless before).
+(defrule
+	(or (building-type-count-total watch-tower > 0) (building-type-count-total castle > 0))
+	(can-research ri-murder-holes)
+=> (research ri-murder-holes))
 (defrule (current-age >= imperial-age)(can-research ri-architecture) => (research ri-architecture))
 ;endregion
 
@@ -822,6 +846,7 @@
 ;region MILITARY: SCOUTS (plan-aware) + scout defence =============================
 (defrule
 	(current-age == feudal-age)(goal gl-plan 1)(food-amount > 80)
+	(not (goal gl-scrush 3))
 	(can-train scout-cavalry-line)
 	(unit-type-count-total scout-cavalry-line < 6)
 	(not (up-research-status c: castle-age c:>= research-pending))
