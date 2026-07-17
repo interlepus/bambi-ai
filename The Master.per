@@ -1,15 +1,24 @@
 ;==================================================================================
-; THE MASTER - v1.1
+; THE MASTER - v2.0
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
 ;
-; v1.1 — the Scout Rush now actually RUSHES (v1.0 trained scouts but the only attack
-;  trigger was 8 knights in Castle Age): offense priorities target the enemy ECONOMY
-;  (houses/mills/camps, towers ignored) and waves launch on a 40s cadence, deactivating
-;  vs massed spears or Castle Age (pattern proven in Bambi + Rehoboam). Also: 2nd house
-;  at the start; Feudal spearmen vs enemy scout raids (spears are anti-cavalry only);
-;  Squires + infantry armour gated on owning axemen/spears.
+; v2.0 — major upgrade after studying Sol (ChatGPT's competing AI), Rehoboam & co:
+;  * FIXED-HOME THREAT SCAN (idea from Sol): DUC-counts enemy units around our ORIGINAL
+;    home point. town-under-attack goes unreliable once the town radius grows — fighting
+;    at the enemy base looked like a home raid, pausing attacks and pulling militia.
+;    All offensive pause / militia / boom gates now use the home-threat signal.
+;  * KNIGHT TARGET DISCIPLINE (idea from Sol): offense priorities on unit types — kill
+;    mangonels/monks/rams/spears/villagers first; towers ignored until the army is big.
+;  * TSA push uses a DEFENSE-priority table (eco buildings high, towers/castle = never).
+;  * Boar lure fail-safe timers (lurer death no longer locks food gathering forever).
+;  * TSA-lite gated to Castle Age (9 scouts could explode the town radius in Feudal).
+;  * Dynamic market (sell surplus food/wood when gold-starved), enemy-knight counter
+;    (pikes+monks), early monastery vs cavalry, age-scaled camp distances, imperial
+;    unlimited drop distances, wheelbarrow imperial fallback, age timestamps in debug.
+;  NO ESCROW by design (v0.8 lesson) — Sol's Castle escrow bug (blocked villagers,
+;  idle TCs) is exactly the trap this architecture eliminates.
 ;
 ; v1.0 — architecture + the v0.9 review:
 ;  * AGE-UP now sits ABOVE villager production: rule-order gives it the TC first, so
@@ -32,7 +41,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v1.1 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.0 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -50,11 +59,24 @@
 (defconst gl-plan 8)               ; 0 undecided, 1 = scout rush, 2 = fast castle
 (defconst gl-boar-state 10)        ; 0 idle, 1 luring with 1, 2 swarming with 6
 (defconst gl-scrush 11)            ; 0 idle, 1 armed, 2 raiding, 3 done/off
+(defconst gl-home-x 15)            ; original home point (x,y = 15,16 consecutive)
+(defconst gl-home-y 16)
+(defconst gl-tmp 17)               ; scratch (age timestamps etc.)
+(defconst gl-target-player 18)     ; the 1v1 enemy player number
+(defconst gl-home-threat 19)       ; enemy units near ORIGINAL home (fixed-home scan)
+(defconst gl-search-base 20)       ; up-get-search-state writes 20..23 — keep reserved
+(defconst gl-enemy-cavalry 24)     ; enemy fields massed knights
 
 (defconst priority-offense 0)      ; for up-reset-target-priorities
+(defconst all-units-class -1)      ; any-unit class for DUC searches
+(defconst enemy 3)                 ; player stance group for up-find-player
+(defconst find-closest 2)          ; up-find-player mode
+(defconst gl-search-remote-count 22) ; 3rd of the 4 consecutive search-state goals
 
 (defconst timer-debug 1)
 (defconst timer-attack 2)
+(defconst timer-homescan 3)
+(defconst timer-boar 4)
 ;endregion
 
 ;region INIT / STATE ===============================================================
@@ -69,9 +91,61 @@
 	(set-goal gl-plan 0)
 	(set-goal gl-boar-state 0)
 	(set-goal gl-scrush 0)
+	(set-goal gl-home-threat 0)
+	(set-goal gl-enemy-cavalry off)
 	(disable-self)
 )
 (defrule (true) => (enable-timer timer-debug 20) (disable-self))
+
+; TSA/defence target table (Sol's insight: the town-radius push clears buildings via the
+; DEFENSE priority table). Prefer exposed eco/production; never dive towers or castles.
+(defrule
+	(true)
+=>
+	(up-set-defense-priority c: mining-camp c: 20000)
+	(up-set-defense-priority c: lumber-camp c: 18000)
+	(up-set-defense-priority c: mill c: 16000)
+	(up-set-defense-priority c: archery-range c: 14000)
+	(up-set-defense-priority c: stable c: 12000)
+	(up-set-defense-priority c: barracks c: 10000)
+	(up-set-defense-priority c: town-center c: 4000)
+	(up-set-defense-priority c: watch-tower c: -1)
+	(up-set-defense-priority c: castle c: -1)
+	(disable-self)
+)
+
+; Record the ORIGINAL home point + find our 1v1 opponent, then start the home scan.
+(defrule
+	(game-time > 5)
+=>
+	(up-get-point position-self gl-home-x)
+	(up-find-player enemy find-closest gl-target-player)
+	(enable-timer timer-homescan 4)
+	(disable-self)
+)
+;endregion
+
+;region FIXED-HOME THREAT SCAN (from Sol) =========================================
+; Count enemy units within 36 tiles of the ORIGINAL home point. This stays accurate
+; when the town radius has grown toward the enemy — fighting at THEIR base can no
+; longer masquerade as a raid on ours.
+(defrule
+	(timer-triggered timer-homescan)
+	(up-compare-goal gl-target-player > 0)
+=>
+	(disable-timer timer-homescan)
+	(up-modify-sn sn-focus-player-number g:= gl-target-player)
+	(up-full-reset-search)
+	(up-set-target-point gl-home-x)
+	(up-filter-distance c: -1 c: 36)
+	(up-find-remote c: all-units-class c: 40)
+	(up-get-search-state gl-search-base)
+	(up-modify-goal gl-home-threat c:= 0)
+	(up-modify-goal gl-home-threat g:+ gl-search-remote-count)
+	(set-strategic-number sn-focus-player-number 0)
+	(up-full-reset-search)
+	(enable-timer timer-homescan 4)
+)
 ;endregion
 
 ;region INITIAL STRATEGIC NUMBERS ==================================================
@@ -169,6 +243,7 @@
 	(set-strategic-number sn-minimum-number-hunters 1)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1)
 	(set-goal gl-boar-state 1)
+	(enable-timer timer-boar 90)
 	(chat-to-player my-player-number "[MASTER] Luring boar with 1 villager")
 )
 (defrule
@@ -176,9 +251,11 @@
 	(dropsite-min-distance live-boar > -1)
 	(dropsite-min-distance live-boar <= 13)
 =>
+	(disable-timer timer-boar)
 	(set-strategic-number sn-minimum-number-hunters 6)
 	(set-strategic-number sn-minimum-boar-hunt-group-size 6)
 	(set-goal gl-boar-state 2)
+	(enable-timer timer-boar 60)
 	(chat-to-player my-player-number "[MASTER] Boar at the TC -> 6 hunters")
 )
 (defrule
@@ -190,6 +267,32 @@
 	(set-strategic-number sn-minimum-boar-hunt-group-size 0)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1000)
 	(set-goal gl-boar-state 0)
+	(disable-timer timer-boar)
+)
+
+; FAIL-SAFES (from Sol): if the lure or the kill stalls (lurer died, boar stolen),
+; unwind so "nothing-but-boar-hunting" mode can't lock food gathering forever.
+(defrule
+	(goal gl-boar-state 1)
+	(timer-triggered timer-boar)
+=>
+	(set-strategic-number sn-enable-boar-hunting 1)
+	(set-strategic-number sn-minimum-number-hunters 0)
+	(set-strategic-number sn-minimum-boar-lure-group-size 1000)
+	(set-goal gl-boar-state 0)
+	(disable-timer timer-boar)
+	(chat-to-player my-player-number "[MASTER] Boar lure timed out -> reset")
+)
+(defrule
+	(goal gl-boar-state 2)
+	(timer-triggered timer-boar)
+=>
+	(set-strategic-number sn-enable-boar-hunting 1)
+	(set-strategic-number sn-minimum-number-hunters 0)
+	(set-strategic-number sn-minimum-boar-hunt-group-size 0)
+	(set-strategic-number sn-minimum-boar-lure-group-size 1000)
+	(set-goal gl-boar-state 0)
+	(disable-timer timer-boar)
 )
 ;endregion
 
@@ -325,6 +428,22 @@
 ; Stone PILE -> stop over-mining stone, put it on wood.
 (defrule (stone-amount > 600)(strategic-number sn-stone-gatherer-percentage > 2)
 => (up-modify-sn sn-stone-gatherer-percentage c:- 4)(up-modify-sn sn-wood-gatherer-percentage c:+ 4))
+
+; Camps may reach farther as the map opens up (crowded/exhausted deposits -> new mines).
+(defrule (current-age == castle-age)(strategic-number sn-camp-max-distance < 22)
+=> (set-strategic-number sn-camp-max-distance 22))
+(defrule (current-age == imperial-age)(strategic-number sn-camp-max-distance < 28)
+=> (set-strategic-number sn-camp-max-distance 28))
+; Imperial: no drop-distance caps — gather wherever resources remain (Sol's idea).
+(defrule
+	(current-age == imperial-age)
+=>
+	(set-strategic-number sn-maximum-food-drop-distance -1)
+	(set-strategic-number sn-maximum-wood-drop-distance -1)
+	(set-strategic-number sn-maximum-gold-drop-distance -1)
+	(set-strategic-number sn-maximum-stone-drop-distance -1)
+	(disable-self)
+)
 ;endregion
 
 ;region ECONOMY: FARMS (Franks get farm upgrades free) ============================
@@ -446,12 +565,17 @@
 	(can-build town-center)
 	(up-pending-objects c: town-center < 1)
 	(civilian-population > 28)
-	(not (town-under-attack))
+	(up-compare-goal gl-home-threat < 6)
 => (up-assign-builders c: town-center c: 3)(build town-center))
 
-; Monastery + monks for relic gold (continuous trickle) once we're booming on 3 TCs.
+; Monastery: for relic gold at 3 TCs, EARLY vs enemy knights (conversions), or as the
+; 2nd Castle-Age building when the bank is Imperial-ready (imp needs 2 of them!).
 (defrule
-	(building-type-count-total town-center >= 3)
+	(current-age >= castle-age)
+	(or
+		(building-type-count-total town-center >= 3)
+		(or (goal gl-enemy-cavalry on) (and (food-amount > 900) (gold-amount > 700)))
+	)
 	(building-type-count-total monastery < 1)
 	(can-build monastery)
 	(up-pending-objects c: monastery < 1)
@@ -461,6 +585,20 @@
 	(can-train monk)
 	(unit-type-count-total monks < 3)
 => (train monk))
+; Extra monks vs massed enemy knights (conversion defence).
+(defrule
+	(goal gl-enemy-cavalry on)
+	(building-type-count monastery > 0)
+	(can-train monk)
+	(unit-type-count-total monks < 5)
+=> (train monk))
+; Pikemen vs enemy knight mass (anti-cavalry — their one good matchup).
+(defrule
+	(goal gl-enemy-cavalry on)
+	(current-age >= castle-age)
+	(can-train spearman-line)
+	(unit-type-count-total spearman-line < 8)
+=> (train spearman-line))
 ;endregion
 
 ;region FEUDAL FORK: SCOUT RUSH vs FAST CASTLE ====================================
@@ -566,6 +704,11 @@
 	(not (players-current-age any-enemy >= castle-age))
 	(can-research ri-wheel-barrow)
 => (research ri-wheel-barrow))
+; ...but never skip it forever: by Imperial it's always worth it.
+(defrule
+	(current-age >= imperial-age)
+	(can-research ri-wheel-barrow)
+=> (research ri-wheel-barrow))
 ; Hand cart at 2+ TCs or 60+ vils.
 (defrule (or (building-type-count-total town-center >= 2) (civilian-population > 60))(can-research ri-hand-cart) => (research ri-hand-cart))
 
@@ -630,6 +773,16 @@
 	(or (players-unit-type-count any-enemy archer-line >= 4) (players-unit-type-count any-enemy skirmisher-line >= 4))
 	(goal gl-enemy-ranged off)
 => (set-goal gl-enemy-ranged on))
+
+; Enemy massed knights -> pikes + monks alongside our own knights.
+(defrule
+	(players-unit-type-count any-enemy knight-line >= 4)
+	(goal gl-enemy-cavalry off)
+=> (set-goal gl-enemy-cavalry on))
+(defrule
+	(players-unit-type-count any-enemy knight-line < 2)
+	(goal gl-enemy-cavalry on)
+=> (set-goal gl-enemy-cavalry off))
 ;endregion
 
 ;region MILITARY: SCOUTS (plan-aware) + scout defence =============================
@@ -717,10 +870,11 @@
 ;region TSA-LITE: GROW DEFENDED RADIUS WITH ARMY ==================================
 (defrule (true) => (up-get-fact military-population 0 gl-my-army))
 (defrule
+	(current-age >= castle-age)
 	(up-compare-goal gl-my-army g:>= gl-town-size-step)
 	(strategic-number sn-maximum-town-size < 80)
 	(military-population >= 10)
-	(not (town-under-attack))
+	(up-compare-goal gl-home-threat < 3)
 =>
 	(up-modify-sn sn-maximum-town-size c:+ 4)
 	(up-modify-goal gl-town-size-step c:= gl-my-army)
@@ -731,9 +885,24 @@
 ;region ATTACK ====================================================================
 (defrule
 	(goal gl-attack off)(current-age >= castle-age)
-	(unit-type-count knight-line >= 8)(not (town-under-attack))
+	(unit-type-count knight-line >= 8)
+	(up-compare-goal gl-home-threat < 4)
 =>
 	(set-goal gl-attack on)
+	; Target discipline (from Sol): kill counters/siege/monks/villagers first; leave
+	; towers alone until the army is big enough (rams/trebs handle fortifications).
+	(up-reset-target-priorities priority-offense 1)
+	(up-set-offense-priority c: mangonel-line c: 11)
+	(up-set-offense-priority c: monk c: 11)
+	(up-set-offense-priority c: battering-ram-line c: 10)
+	(up-set-offense-priority c: camel-line c: 10)
+	(up-set-offense-priority c: spearman-line c: 9)
+	(up-set-offense-priority c: villager c: 8)
+	(up-set-offense-priority c: house c: 5)
+	(up-set-offense-priority c: mill c: 6)
+	(up-set-offense-priority c: mining-camp c: 6)
+	(up-set-offense-priority c: lumber-camp c: 6)
+	(set-strategic-number sn-disable-tower-priority 1)
 	(set-strategic-number sn-number-attack-groups 100)
 	(attack-now)
 	(enable-timer timer-attack 45)
@@ -741,19 +910,49 @@
 )
 (defrule
 	(goal gl-attack on)(timer-triggered timer-attack)
-	(military-population >= 10)(not (town-under-attack))
+	(military-population >= 10)
+	(up-compare-goal gl-home-threat < 4)
 => (attack-now)(disable-timer timer-attack)(enable-timer timer-attack 45))
+; Army is big -> stop avoiding fortifications; siege the base down.
+(defrule
+	(goal gl-attack on)
+	(military-population > 30)
+	(strategic-number sn-disable-tower-priority == 1)
+=> (set-strategic-number sn-disable-tower-priority 0))
 (defrule
 	(goal gl-attack on)(military-population < 6)
 => (set-goal gl-attack off)(set-strategic-number sn-number-attack-groups 0)(disable-timer timer-attack)(chat-to-player my-player-number "[MASTER] Regrouping: army too low"))
 ;endregion
 
 ;region DEFENCE REACTIONS =========================================================
-(defrule (town-under-attack)(strategic-number sn-number-civilian-militia != 8) => (set-strategic-number sn-number-civilian-militia 8))
-(defrule (not (town-under-attack))(strategic-number sn-number-civilian-militia != 0) => (set-strategic-number sn-number-civilian-militia 0))
+; Militia only on a REAL home raid: the fixed-home scan, or town-under-attack while the
+; town radius is still small (early game, before TSA growth makes it unreliable).
+(defrule
+	(or
+		(up-compare-goal gl-home-threat >= 3)
+		(and (town-under-attack) (strategic-number sn-maximum-town-size <= 26))
+	)
+	(strategic-number sn-number-civilian-militia != 8)
+=> (set-strategic-number sn-number-civilian-militia 8))
+(defrule
+	(up-compare-goal gl-home-threat < 3)
+	(not (town-under-attack))
+	(strategic-number sn-number-civilian-militia != 0)
+=> (set-strategic-number sn-number-civilian-militia 0))
 ;endregion
 
-;region MARKET FAIL-SAFES =========================================================
+;region MARKET FAIL-SAFES & DYNAMIC TRADING =======================================
+; Gold-starved with a food/wood surplus -> convert it (funds Castle click / knights).
+(defrule
+	(current-age == feudal-age)
+	(food-amount > 850)(gold-amount < 180)
+	(can-sell-commodity food)
+=> (sell-commodity food))
+(defrule
+	(current-age >= castle-age)
+	(gold-amount < 100)(wood-amount > 650)
+	(can-sell-commodity wood)
+=> (sell-commodity wood))
 (defrule
 	(current-age >= castle-age)(building-type-count-total castle == 0)
 	(stone-amount < 500)(wood-amount > 250)(gold-amount > 200)(can-buy-commodity stone)
@@ -771,9 +970,10 @@
 ;endregion
 
 ;region DEBUG / TELEMETRY =========================================================
-(defrule (goal gl-debug on)(current-age == feudal-age)  => (chat-to-player my-player-number "[MASTER] >>> FEUDAL AGE")  (disable-self))
-(defrule (goal gl-debug on)(current-age == castle-age)  => (chat-to-player my-player-number "[MASTER] >>> CASTLE AGE")  (disable-self))
-(defrule (goal gl-debug on)(current-age == imperial-age)=> (chat-to-player my-player-number "[MASTER] >>> IMPERIAL AGE")(disable-self))
+(defrule (goal gl-debug on)(current-age == feudal-age)  => (up-get-fact game-time 0 gl-tmp)(up-chat-data-to-self "[MASTER] >>> FEUDAL AGE at %d s" g: gl-tmp)  (disable-self))
+(defrule (goal gl-debug on)(current-age == castle-age)  => (up-get-fact game-time 0 gl-tmp)(up-chat-data-to-self "[MASTER] >>> CASTLE AGE at %d s" g: gl-tmp)  (disable-self))
+(defrule (goal gl-debug on)(current-age == imperial-age)=> (up-get-fact game-time 0 gl-tmp)(up-chat-data-to-self "[MASTER] >>> IMPERIAL AGE at %d s" g: gl-tmp)(disable-self))
+(defrule (goal gl-debug on)(goal gl-enemy-cavalry on)   => (chat-to-player my-player-number "[MASTER] counter: enemy knights -> pikes + monks") (disable-self))
 (defrule (goal gl-debug on)(goal gl-enemy-anti-cav on)  => (chat-to-player my-player-number "[MASTER] counter: enemy spears/camels -> Throwing Axemen") (disable-self))
 (defrule (goal gl-debug on)(goal gl-enemy-ranged on)    => (chat-to-player my-player-number "[MASTER] counter: enemy archers -> skirms + Fletching") (disable-self))
 (defrule
@@ -781,6 +981,7 @@
 =>
 	(up-chat-data-to-self "[MASTER] mil-pop=%d" g: gl-my-army)
 	(up-chat-data-to-self "[MASTER] town-size=%d" s: sn-maximum-town-size)
+	(up-chat-data-to-self "[MASTER] home-threat=%d" g: gl-home-threat)
 	(disable-timer timer-debug)(enable-timer timer-debug 60)
 )
 ;endregion
