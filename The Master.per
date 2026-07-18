@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.3
+; THE MASTER - v2.4
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -45,7 +45,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.3 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.4 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -81,6 +81,8 @@
 (defconst timer-attack 2)
 (defconst timer-homescan 3)
 (defconst timer-boar 4)
+(defconst timer-mines 5)
+(defconst timer-running 2)          ; up-timer-status state value
 ;endregion
 
 ;region INIT / STATE ===============================================================
@@ -240,11 +242,11 @@
 	(up-compare-goal gl-home-threat < 6)
 => (up-assign-builders c: town-center c: 3)(build town-center))
 
-; Monastery right after the 2nd TC -> monk -> relic gold trickle.
+; Monastery AFTER all 3 TCs are placed (boom first!) -> monk -> relic gold trickle.
 (defrule
 	(current-age >= castle-age)
 	(or
-		(building-type-count-total town-center >= 2)
+		(building-type-count-total town-center >= 3)
 		(or (goal gl-enemy-cavalry on) (and (food-amount > 900) (gold-amount > 700)))
 	)
 	(building-type-count-total monastery < 1)
@@ -565,9 +567,18 @@
 	(can-build house)
 	(up-pending-objects c: house < 2)
 => (build house))
-(defrule (current-age <= feudal-age)(housing-headroom < 6)(population-headroom > 0)(up-pending-objects c: house < 2)(can-build house) => (build house))
-(defrule (current-age == castle-age)(housing-headroom < 12)(population-headroom > 0)(up-pending-objects c: house < 3)(can-build house) => (build house))
-(defrule (current-age == imperial-age)(housing-headroom < 18)(population-headroom > 0)(up-pending-objects c: house < 5)(can-build house) => (build house))
+; STUCK-PLACEMENT GUARD (Bambi's fix for the 55-pop house freeze): an interrupted
+; build (builder killed / cancelled) can leave a pending placement forever, which
+; blocks the pending-count gates below. Reset it and carry on.
+(defrule (up-pending-placement c: house) => (up-reset-placement c: house))
+(defrule (up-pending-placement c: town-center) => (up-reset-placement c: town-center))
+
+; Housing ladder (Bambi): build 5 ahead in Dark, 10 in Feudal, 15 in Castle, 20 in
+; Imperial — production explodes with each age.
+(defrule (current-age == dark-age)(housing-headroom < 6)(population-headroom > 0)(up-pending-objects c: house < 2)(can-build house) => (build house))
+(defrule (current-age == feudal-age)(housing-headroom < 10)(population-headroom > 0)(up-pending-objects c: house < 2)(can-build house) => (build house))
+(defrule (current-age == castle-age)(housing-headroom < 15)(population-headroom > 0)(up-pending-objects c: house < 3)(can-build house) => (build house))
+(defrule (current-age == imperial-age)(housing-headroom < 20)(population-headroom > 0)(up-pending-objects c: house < 5)(can-build house) => (build house))
 
 ; Lumber camps: 1 by ~8 vils, 2 in Feudal, 3 in Castle, +1 whenever wood drifts >3.
 (defrule (building-type-count-total lumber-camp < 1)(civilian-population >= 8)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1) => (build lumber-camp))
@@ -602,6 +613,22 @@
 	(up-pending-objects c: mining-camp < 1)
 	(can-build mining-camp)
 => (build mining-camp))
+
+; EXTRA MINES (Bambi): after the 2nd mining camp, add one every ~10 minutes — deposits
+; crowd and exhaust, and villagers otherwise trek to far stockpiles without a dropsite.
+(defrule
+	(building-type-count-total mining-camp >= 2)
+	(up-timer-status timer-mines != timer-running)
+=> (enable-timer timer-mines 600))
+(defrule
+	(timer-triggered timer-mines)
+	(can-build mining-camp)
+	(up-pending-objects c: mining-camp < 1)
+=>
+	(build mining-camp)
+	(disable-timer timer-mines)
+	(enable-timer timer-mines 600)
+)
 ;endregion
 
 ;region BUILDINGS: MILITARY & TECH ================================================
@@ -752,19 +779,25 @@
 (defrule (can-research ri-bow-saw)        => (research ri-bow-saw))
 (defrule (can-research ri-heavy-plow)     => (research ri-heavy-plow))
 
-; Wheelbarrow at end-Feudal/Castle, skip if enemy already in Castle.
+; Eco hand techs as TC-idle fillers (user spec):
 (defrule
-	(or (current-age >= castle-age) (up-research-status c: castle-age c:>= research-pending))
-	(not (players-current-age any-enemy >= castle-age))
+	; Wheelbarrow at 60 vils — OR earlier as a TC-IDLE FILLER: if the TC can't start a
+	; villager (housed / pop-capped) it researches this instead of idling.
+	(or
+		(civilian-population >= 60)
+		(and (current-age >= feudal-age) (not (can-train villager)))
+	)
 	(can-research ri-wheel-barrow)
 => (research ri-wheel-barrow))
-; ...but never skip it forever: by Imperial it's always worth it.
+; Hand cart at 90 vils — or as the same TC-idle filler from Castle Age on.
 (defrule
-	(current-age >= imperial-age)
-	(can-research ri-wheel-barrow)
-=> (research ri-wheel-barrow))
-; Hand cart at 2+ TCs or 60+ vils.
-(defrule (or (building-type-count-total town-center >= 2) (civilian-population > 60))(can-research ri-hand-cart) => (research ri-hand-cart))
+	(or
+		(civilian-population >= 90)
+		(and (current-age >= castle-age) (not (can-train villager)))
+	)
+	(research-completed ri-wheel-barrow)
+	(can-research ri-hand-cart)
+=> (research ri-hand-cart))
 
 (defrule (or (current-age >= castle-age) (up-research-status c: castle-age c:>= research-pending))(can-research ri-gold-mining) => (research ri-gold-mining))
 (defrule (current-age >= castle-age)(can-research ri-gold-shaft-mining) => (research ri-gold-shaft-mining))
