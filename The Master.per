@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.9.5
+; THE MASTER - v2.9.6
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -52,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.5 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.6 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -370,12 +370,12 @@
 
 ; LOOM — above villager production so it can actually claim the TC (Panda's rule).
 (defrule
-	; Loom spec: TIME-FILLER when the TC truly can't produce (housed or short on food,
-	; nothing pending), or under attack, or MORE THAN ONE enemy in town (a single
-	; passing scout doesn't count — that's what fired at 0:54 with 110 food banked).
+	; Loom spec (final): TIME-FILLER when the TC truly can't produce (housed or short
+	; on food, nothing pending — early food-gap looms are correct and human-like), or
+	; under attack, or ANY enemy unit in town (even a scout can snipe villagers).
 	(or
 		(and (up-pending-objects c: villager == 0) (or (food-amount < 50) (housing-headroom == 0)))
-		(or (town-under-attack) (up-enemy-units-in-town > 1))
+		(or (town-under-attack) (up-enemy-units-in-town > 0))
 	)
 	(can-research ri-loom)
 => (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom"))
