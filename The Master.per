@@ -790,9 +790,28 @@
 (defrule (current-age >= castle-age)(building-type-count-total town-center >= 3)(building-type-count-total university < 1)(can-build university)(up-pending-objects c: university < 1)(wood-amount > 200) => (build university))
 (defrule (current-age >= castle-age)(building-type-count-total town-center >= 3)(building-type-count-total siege-workshop < 1)(can-build siege-workshop)(up-pending-objects c: siege-workshop < 1)(military-population > 8) => (build siege-workshop))
 
-(defrule (current-age >= castle-age)(building-type-count-total castle < 1)(can-build castle)(up-pending-objects c: castle < 1) => (up-assign-builders c: castle c: 4)(build castle)(chat-to-player my-player-number "[MASTER] Placing castle"))
+(defrule
+	(current-age >= castle-age)
+	(building-type-count-total castle < 1)
+	(can-build castle)
+	(up-pending-objects c: castle < 1)
+=>
+	(up-assign-builders c: castle c: 4)
+	(build castle)
+	(chat-to-player my-player-number "[MASTER] Placing castle")
+)
 ; 2nd Castle when stone piles (forward/defensive) instead of hoarding stone.
-(defrule (current-age >= castle-age)(building-type-count-total castle < 2)(stone-amount > 650)(can-build castle)(up-pending-objects c: castle < 1) => (up-assign-builders c: castle c: 4)(build castle)(chat-to-player my-player-number "[MASTER] Placing castle 2"))
+(defrule
+	(current-age >= castle-age)
+	(building-type-count-total castle < 2)
+	(stone-amount > 650)
+	(can-build castle)
+	(up-pending-objects c: castle < 1)
+=>
+	(up-assign-builders c: castle c: 4)
+	(build castle)
+	(chat-to-player my-player-number "[MASTER] Placing castle 2")
+)
 ;endregion
 
 ;region ANTI-CAVALRY EXTRAS =======================================================
