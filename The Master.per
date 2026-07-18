@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.9.8
+; THE MASTER - v2.9.9
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -52,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.8 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.9 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -161,6 +161,15 @@
 	(up-find-player enemy find-closest gl-target-player)
 	(set-goal gl-scan-tick 1)
 	(enable-timer timer-homescan 4)
+)
+; Point the engine's TARGET at the real enemy (Bambi does this too). Without it,
+; sn-target-player-number stays 0 and up-enemy-units-in-town counts GAIA — a wandering
+; boar read as "enemy in town" (diagnosed via the split-Loom instrumentation).
+(defrule
+	(up-compare-goal gl-target-player > 0)
+	(strategic-number sn-target-player-number == 0)
+=>
+	(up-modify-sn sn-target-player-number g:= gl-target-player)
 )
 ; Scan: count enemy units AND buildings (a forward tower is a threat!) near home.
 (defrule
@@ -387,6 +396,7 @@
 	(can-research ri-loom)
 => (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom: town under attack"))
 (defrule
+	(up-compare-goal gl-target-player > 0)
 	(up-enemy-units-in-town > 0)
 	(can-research ri-loom)
 => (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom: enemy in town"))
