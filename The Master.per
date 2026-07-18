@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.9.3
+; THE MASTER - v2.9.4
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -52,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.3 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.4 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -371,7 +371,9 @@
 ; LOOM — above villager production so it can actually claim the TC (Panda's rule).
 (defrule
 	(or
-		(and (food-amount < 45) (up-pending-objects c: villager == 0))
+		; idle-filler branch only AFTER the opening (early gaps are seconds long and
+		; bridged by the force-drop — a 25s Loom there just delays villagers)
+		(and (civilian-population >= 12) (and (food-amount < 45) (up-pending-objects c: villager == 0)))
 		(or (civilian-population >= 20) (or (town-under-attack) (up-enemy-units-in-town > 0)))
 	)
 	(can-research ri-loom)
