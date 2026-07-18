@@ -81,6 +81,7 @@
 (defconst building-class 903)      ; generic building class for DUC searches
 (defconst stance-no-attack 3)      ; up-set-attack-stance value
 (defconst gl-overboom 26)          ; on = surplus villagers drafted to the army
+(defconst gl-towers-avoided 27)    ; on = offense currently ignoring towers
 
 (defconst priority-offense 0)      ; for up-reset-target-priorities
 (defconst ri-bearded-axe 83)       ; Franks Castle UT (+1 Throwing Axeman range) — id per Sol/refs
@@ -113,6 +114,7 @@
 	(set-goal gl-enemy-cavalry off)
 	(set-goal gl-target-player 0)
 	(set-goal gl-overboom off)
+	(set-goal gl-towers-avoided off)
 	(disable-self)
 )
 (defrule (true) => (enable-timer timer-debug 20) (disable-self))
@@ -240,8 +242,6 @@
 	(set-strategic-number sn-maximum-gold-drop-distance 30)
 	(set-strategic-number sn-maximum-stone-drop-distance 30)
 	(set-strategic-number sn-camp-max-distance 16)
-	(set-strategic-number sn-lumber-camp-max-distance 15)  ; LCs stay tight to the woodline
-	(set-strategic-number sn-mining-camp-max-distance 20)  ; mines may reach a bit farther
 	(set-strategic-number sn-mill-max-distance 22)
 	(set-strategic-number sn-allow-adjacent-dropsites 1)
 	(set-strategic-number sn-town-center-placement lumber-camp)   ; TCs near woods
@@ -635,9 +635,9 @@
 
 ; Camps may reach farther as the map opens up (crowded/exhausted deposits -> new mines).
 (defrule (current-age == castle-age)(strategic-number sn-camp-max-distance < 22)
-=> (set-strategic-number sn-camp-max-distance 22)(set-strategic-number sn-mining-camp-max-distance 26))
+=> (set-strategic-number sn-camp-max-distance 22))
 (defrule (current-age == imperial-age)(strategic-number sn-camp-max-distance < 28)
-=> (set-strategic-number sn-camp-max-distance 28)(set-strategic-number sn-mining-camp-max-distance 34))
+=> (set-strategic-number sn-camp-max-distance 28))
 ; Imperial: no drop-distance caps — gather wherever resources remain (Sol's idea).
 (defrule
 	(current-age == imperial-age)
@@ -700,9 +700,9 @@
 (defrule (building-type-count-total lumber-camp < 1)(civilian-population >= 8)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1) => (build lumber-camp))
 ; Each new lumber camp EXTENDS the reach (Bambi: c:+ 2 per camp) — otherwise once the
 ; near forest is chopped, placement fails forever and the AI churns camps it can't place.
-(defrule (current-age >= feudal-age)(building-type-count-total lumber-camp < 2)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1)(wood-amount > 100) => (build lumber-camp)(up-modify-sn sn-lumber-camp-max-distance c:+ 3)(up-modify-sn sn-camp-max-distance c:+ 2))
-(defrule (current-age >= castle-age)(building-type-count-total lumber-camp < 3)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1)(wood-amount > 100) => (build lumber-camp)(up-modify-sn sn-lumber-camp-max-distance c:+ 3)(up-modify-sn sn-camp-max-distance c:+ 2))
-(defrule (building-type-count-total lumber-camp >= 1)(dropsite-min-distance wood > 3)(up-pending-objects c: lumber-camp < 1)(can-build lumber-camp) => (build lumber-camp)(up-modify-sn sn-lumber-camp-max-distance c:+ 3)(up-modify-sn sn-camp-max-distance c:+ 2))
+(defrule (current-age >= feudal-age)(building-type-count-total lumber-camp < 2)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1)(wood-amount > 100) => (build lumber-camp)(up-modify-sn sn-camp-max-distance c:+ 2))
+(defrule (current-age >= castle-age)(building-type-count-total lumber-camp < 3)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1)(wood-amount > 100) => (build lumber-camp)(up-modify-sn sn-camp-max-distance c:+ 2))
+(defrule (building-type-count-total lumber-camp >= 1)(dropsite-min-distance wood > 3)(up-pending-objects c: lumber-camp < 1)(can-build lumber-camp) => (build lumber-camp)(up-modify-sn sn-camp-max-distance c:+ 2))
 
 (defrule
 	(building-type-count-total mill == 0)
@@ -839,6 +839,7 @@
 	(up-set-offense-priority c: mining-camp c: 10)
 	(up-set-offense-priority c: lumber-camp c: 11)
 	(set-strategic-number sn-disable-tower-priority 1)
+	(set-goal gl-towers-avoided on)
 	(set-goal gl-scrush 1)
 )
 
@@ -890,6 +891,7 @@
 =>
 	(up-reset-target-priorities priority-offense 0)
 	(set-strategic-number sn-disable-tower-priority 0)
+	(set-goal gl-towers-avoided off)
 	(set-strategic-number sn-number-attack-groups 0)
 	(disable-timer timer-attack)
 	(set-goal gl-scrush 3)
@@ -1159,6 +1161,7 @@
 	(up-set-offense-priority c: mining-camp c: 6)
 	(up-set-offense-priority c: lumber-camp c: 6)
 	(set-strategic-number sn-disable-tower-priority 1)
+	(set-goal gl-towers-avoided on)
 	(set-strategic-number sn-number-attack-groups 100)
 	(attack-now)
 	(enable-timer timer-attack 45)
@@ -1173,8 +1176,8 @@
 (defrule
 	(goal gl-attack on)
 	(military-population > 30)
-	(strategic-number sn-disable-tower-priority == 1)
-=> (set-strategic-number sn-disable-tower-priority 0))
+	(goal gl-towers-avoided on)
+=> (set-strategic-number sn-disable-tower-priority 0)(set-goal gl-towers-avoided off))
 (defrule
 	(goal gl-attack on)(military-population < 6)
 => (set-goal gl-attack off)(set-strategic-number sn-number-attack-groups 0)(disable-timer timer-attack)(chat-to-player my-player-number "[MASTER] Regrouping: army too low"))
