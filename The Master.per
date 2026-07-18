@@ -1,8 +1,15 @@
 ;==================================================================================
-; THE MASTER - v2.9.11
+; THE MASTER - v2.9.12
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
+;
+; v2.9.12 — HOUSING FREEZE AFTER ATTACKS SOLVED: v2.7's guards reset every pending
+;  placement every pass — but under load (farm-ringed core + combat) a house search
+;  legitimately spans passes, so the guard cancelled every attempt (livelock at the
+;  pop cap while wood piled). Real Bambi guards only house/nomad-TC/timed market.
+;  Guards now fire on a 7s tick (wedges still clear <=7s, searches get peace) and an
+;  emergency 2-builder crew speeds houses whenever headroom <= 1.
 ;
 ; v2.9.11 — LOOM ANOMALY SOLVED: up-enemy-units-in-town counts GAIA. airef defines it
 ;  as "targetable enemy units in town" — a STATIC boar/wolf inside the town radius
@@ -62,7 +69,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.11 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.12 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -92,6 +99,8 @@
 (defconst stance-no-attack 3)      ; up-set-attack-stance value
 (defconst gl-overboom 26)          ; on = surplus villagers drafted to the army
 (defconst gl-towers-avoided 27)    ; on = offense currently ignoring towers
+(defconst gl-guard-tick 28)        ; 1 = stuck-placement guards may fire this pass
+(defconst gl-house-boost 29)       ; 1 = emergency 2-builder house crew active
 
 (defconst priority-offense 0)      ; for up-reset-target-priorities
 (defconst ri-bearded-axe 83)       ; Franks Castle UT (+1 Throwing Axeman range) — id per Sol/refs
@@ -105,6 +114,7 @@
 (defconst timer-homescan 3)
 (defconst timer-boar 4)
 (defconst timer-mines 5)
+(defconst timer-guard 6)            ; stuck-placement guard tick (7s)
 (defconst timer-disabled 0)         ; up-timer-status state value
 ;endregion
 
@@ -217,28 +227,40 @@
 )
 ;endregion
 
-;region STUCK-PLACEMENT GUARDS (Bambi's positional pattern — ALL buildings) ========
-; No timer needed: a normal (build X) placement resolves within its own pass, so these
-; guards — running at the TOP of the pass, BEFORE any build rule — can only ever see a
-; placement still pending from the PREVIOUS pass, i.e. genuinely stuck (builder killed,
-; spot invalidated). My v2.4 guard sat BELOW the build rules and cancelled the normal
-; same-pass transient: zero houses. Position does the work. (Farms excluded: the engine
-; manages the farm queue itself and resets could disturb it — Bambi skips them too.)
-(defrule (up-pending-placement c: house)          => (up-reset-placement c: house))
-(defrule (up-pending-placement c: town-center)    => (up-reset-placement c: town-center))
-(defrule (up-pending-placement c: lumber-camp)    => (up-reset-placement c: lumber-camp))
-(defrule (up-pending-placement c: mill)           => (up-reset-placement c: mill))
-(defrule (up-pending-placement c: mining-camp)    => (up-reset-placement c: mining-camp))
-(defrule (up-pending-placement c: barracks)       => (up-reset-placement c: barracks))
-(defrule (up-pending-placement c: stable)         => (up-reset-placement c: stable))
-(defrule (up-pending-placement c: blacksmith)     => (up-reset-placement c: blacksmith))
-(defrule (up-pending-placement c: archery-range)  => (up-reset-placement c: archery-range))
-(defrule (up-pending-placement c: market)         => (up-reset-placement c: market))
-(defrule (up-pending-placement c: university)     => (up-reset-placement c: university))
-(defrule (up-pending-placement c: siege-workshop) => (up-reset-placement c: siege-workshop))
-(defrule (up-pending-placement c: castle)         => (up-reset-placement c: castle))
-(defrule (up-pending-placement c: monastery)      => (up-reset-placement c: monastery))
-(defrule (up-pending-placement c: watch-tower)    => (up-reset-placement c: watch-tower))
+;region STUCK-PLACEMENT GUARDS (7-second tick — v2.9.12 root-cause fix) ============
+; v2.9.12: the v2.7 guards reset EVERY pending placement EVERY pass. That is NOT
+; what Bambi does, and it froze housing under load: a house placement legitimately
+; stays pending across passes while DE's search retries/widens (town core ringed by
+; farms, combat blocking tiles) — and the per-pass reset cancelled every attempt.
+; Livelock: build fires -> placement pending -> reset -> build fires... house never
+; lands while wood piles up (observed: 39/40 pop, 189w, 15:42, right after a raid).
+; The REAL Bambi (V33.1 checked): house guard only (+up-jump-rule pass skip after a
+; reset), TC guard only while count==0 (nomad rescue), lumber camp commented OUT,
+; market on a 300s TIMER that also widens the placement zone. airef on
+; up-reset-placement: "use with caution."
+; Fix: guards fire only on a 7s tick. A genuinely wedged placement (v2.4: stuck for
+; MINUTES at 55 pop) still clears within <=7s; a healthy in-flight search now gets
+; ~7s of unmolested retrying between ticks. Guards stay ABOVE all build rules.
+; (Farms excluded: the engine manages the farm queue itself — Bambi skips them too.)
+(defrule (true) => (enable-timer timer-guard 7)(disable-self))
+(defrule (timer-triggered timer-guard)
+=> (disable-timer timer-guard)(set-goal gl-guard-tick 1)(enable-timer timer-guard 7))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: house)          => (up-reset-placement c: house))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: town-center)    => (up-reset-placement c: town-center))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: lumber-camp)    => (up-reset-placement c: lumber-camp))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: mill)           => (up-reset-placement c: mill))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: mining-camp)    => (up-reset-placement c: mining-camp))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: barracks)       => (up-reset-placement c: barracks))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: stable)         => (up-reset-placement c: stable))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: blacksmith)     => (up-reset-placement c: blacksmith))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: archery-range)  => (up-reset-placement c: archery-range))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: market)         => (up-reset-placement c: market))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: university)     => (up-reset-placement c: university))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: siege-workshop) => (up-reset-placement c: siege-workshop))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: castle)         => (up-reset-placement c: castle))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: monastery)      => (up-reset-placement c: monastery))
+(defrule (goal gl-guard-tick 1)(up-pending-placement c: watch-tower)    => (up-reset-placement c: watch-tower))
+(defrule (goal gl-guard-tick 1) => (set-goal gl-guard-tick 0))
 ;endregion
 
 ;region INITIAL STRATEGIC NUMBERS ==================================================
@@ -739,8 +761,20 @@
 	(up-pending-objects c: house < 2)
 => (build house))
 ; (Stuck-placement handling lives in the top-of-file STUCK-PLACEMENT GUARDS region —
-;  Bambi's positional pattern: guards above all build rules see only cross-pass stuck
-;  placements, never the normal same-pass transient.)
+;  since v2.9.12 on a 7s tick, so in-flight placements survive between ticks.)
+
+; EMERGENCY BUILDER BOOST (v2.9.12): at the pop cap every second counts — 2 builders
+; on houses while headroom <= 1, back to 1 once air returns. The same state machine
+; also gives the opening its 2-builder first house.
+(defrule
+	(housing-headroom <= 1)
+	(up-pending-objects c: house > 0)
+	(goal gl-house-boost 0)
+=> (set-goal gl-house-boost 1)(up-assign-builders c: house c: 2))
+(defrule
+	(housing-headroom >= 4)
+	(goal gl-house-boost 1)
+=> (set-goal gl-house-boost 0)(up-assign-builders c: house c: 1))
 
 ; Housing ladder (Bambi): build 5 ahead in Dark, 10 in Feudal, 15 in Castle, 20 in
 ; Imperial — production explodes with each age.
