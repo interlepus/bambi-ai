@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.6
+; THE MASTER - v2.7
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -52,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.6 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.7 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -90,10 +90,7 @@
 (defconst timer-homescan 3)
 (defconst timer-boar 4)
 (defconst timer-mines 5)
-(defconst timer-stuck-house 6)
-(defconst timer-stuck-tc 7)
-(defconst timer-running 2)          ; up-timer-status state values
-(defconst timer-disabled 0)
+(defconst timer-disabled 0)         ; up-timer-status state value
 ;endregion
 
 ;region INIT / STATE ===============================================================
@@ -163,6 +160,30 @@
 	(up-full-reset-search)
 	(enable-timer timer-homescan 4)
 )
+;endregion
+
+;region STUCK-PLACEMENT GUARDS (Bambi's positional pattern — ALL buildings) ========
+; No timer needed: a normal (build X) placement resolves within its own pass, so these
+; guards — running at the TOP of the pass, BEFORE any build rule — can only ever see a
+; placement still pending from the PREVIOUS pass, i.e. genuinely stuck (builder killed,
+; spot invalidated). My v2.4 guard sat BELOW the build rules and cancelled the normal
+; same-pass transient: zero houses. Position does the work. (Farms excluded: the engine
+; manages the farm queue itself and resets could disturb it — Bambi skips them too.)
+(defrule (up-pending-placement c: house)          => (up-reset-placement c: house))
+(defrule (up-pending-placement c: town-center)    => (up-reset-placement c: town-center))
+(defrule (up-pending-placement c: lumber-camp)    => (up-reset-placement c: lumber-camp))
+(defrule (up-pending-placement c: mill)           => (up-reset-placement c: mill))
+(defrule (up-pending-placement c: mining-camp)    => (up-reset-placement c: mining-camp))
+(defrule (up-pending-placement c: barracks)       => (up-reset-placement c: barracks))
+(defrule (up-pending-placement c: stable)         => (up-reset-placement c: stable))
+(defrule (up-pending-placement c: blacksmith)     => (up-reset-placement c: blacksmith))
+(defrule (up-pending-placement c: archery-range)  => (up-reset-placement c: archery-range))
+(defrule (up-pending-placement c: market)         => (up-reset-placement c: market))
+(defrule (up-pending-placement c: university)     => (up-reset-placement c: university))
+(defrule (up-pending-placement c: siege-workshop) => (up-reset-placement c: siege-workshop))
+(defrule (up-pending-placement c: castle)         => (up-reset-placement c: castle))
+(defrule (up-pending-placement c: monastery)      => (up-reset-placement c: monastery))
+(defrule (up-pending-placement c: watch-tower)    => (up-reset-placement c: watch-tower))
 ;endregion
 
 ;region INITIAL STRATEGIC NUMBERS ==================================================
@@ -578,42 +599,9 @@
 	(can-build house)
 	(up-pending-objects c: house < 2)
 => (build house))
-; STUCK-PLACEMENT GUARD, v2.6 REWRITE. The v2.4 unconditional version cancelled every
-; placement during its NORMAL pending moment -> zero houses ever. Now a placement is
-; reset only if it stays pending through a full 20s timer window (genuinely stuck,
-; e.g. builder killed) — normal placements resolve and disarm the timer long before.
-(defrule
-	(up-pending-placement c: house)
-	(up-timer-status timer-stuck-house == timer-disabled)
-=> (enable-timer timer-stuck-house 20))
-(defrule
-	(not (up-pending-placement c: house))
-	(up-timer-status timer-stuck-house != timer-disabled)
-=> (disable-timer timer-stuck-house))
-(defrule
-	(up-pending-placement c: house)
-	(timer-triggered timer-stuck-house)
-=>
-	(up-reset-placement c: house)
-	(disable-timer timer-stuck-house)
-	(chat-to-player my-player-number "[MASTER] Unstuck house placement")
-)
-(defrule
-	(up-pending-placement c: town-center)
-	(up-timer-status timer-stuck-tc == timer-disabled)
-=> (enable-timer timer-stuck-tc 20))
-(defrule
-	(not (up-pending-placement c: town-center))
-	(up-timer-status timer-stuck-tc != timer-disabled)
-=> (disable-timer timer-stuck-tc))
-(defrule
-	(up-pending-placement c: town-center)
-	(timer-triggered timer-stuck-tc)
-=>
-	(up-reset-placement c: town-center)
-	(disable-timer timer-stuck-tc)
-	(chat-to-player my-player-number "[MASTER] Unstuck TC placement")
-)
+; (Stuck-placement handling lives in the top-of-file STUCK-PLACEMENT GUARDS region —
+;  Bambi's positional pattern: guards above all build rules see only cross-pass stuck
+;  placements, never the normal same-pass transient.)
 
 ; Housing ladder (Bambi): build 5 ahead in Dark, 10 in Feudal, 15 in Castle, 20 in
 ; Imperial — production explodes with each age.
