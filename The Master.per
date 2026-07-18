@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.8
+; THE MASTER - v2.9
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -52,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.8 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -79,6 +79,8 @@
 (defconst gl-enemy-cavalry 24)     ; enemy fields massed knights
 (defconst gl-scan-tick 25)         ; 1 = a home-scan tick is due this pass
 (defconst building-class 903)      ; generic building class for DUC searches
+(defconst stance-no-attack 3)      ; up-set-attack-stance value
+(defconst gl-overboom 26)          ; on = surplus villagers drafted to the army
 
 (defconst priority-offense 0)      ; for up-reset-target-priorities
 (defconst ri-bearded-axe 83)       ; Franks Castle UT (+1 Throwing Axeman range) — id per Sol/refs
@@ -110,6 +112,7 @@
 	(set-goal gl-home-threat 0)
 	(set-goal gl-enemy-cavalry off)
 	(set-goal gl-target-player 0)
+	(set-goal gl-overboom off)
 	(disable-self)
 )
 (defrule (true) => (enable-timer timer-debug 20) (disable-self))
@@ -364,6 +367,17 @@
 =>
 	(up-drop-resources food c: 1)
 )
+
+; LOOM — above villager production so it can actually claim the TC (Panda's rule).
+(defrule
+	(or (food-amount < 45) (or (civilian-population >= 20) (or (town-under-attack) (up-enemy-units-in-town > 0))))
+	(can-research ri-loom)
+=> (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom"))
+
+; PRIORITY DEFENSIVE TECHS — when actually threatened these outrank everything below.
+(defrule (town-under-attack)(can-research ri-fletching) => (research ri-fletching))
+(defrule (goal gl-enemy-ranged on)(unit-type-count-total skirmisher-line > 0)(can-research ri-elite-skirmisher) => (research ri-elite-skirmisher))
+(defrule (goal gl-enemy-ranged on)(unit-type-count-total skirmisher-line > 0)(can-research ri-padded-archer-armor) => (research ri-padded-archer-armor))
 ;endregion
 
 ;region BOAR LURE (1 lurer -> boar walks to TC -> 6 hunters) =======================
@@ -434,11 +448,43 @@
 ;region ECONOMY: VILLAGER PRODUCTION (age-up above already has TC priority) =========
 (defrule
 	(can-train villager)
-	(civilian-population < 95)
+	; Bambi's philosophy: keep producing while pop headroom remains — surplus villagers
+	; are drafted later (overboom) to make room for army.
+	(or
+		(civilian-population < 110)
+		(and (civilian-population < 132) (population-headroom > 10))
+	)
 	(population-headroom > 0)
 	(housing-headroom > 0)
 =>
 	(train villager)
+)
+;endregion
+
+;region OVERBOOM RELEASE (Bambi) ==================================================
+; Pop nearly capped on a huge civilian economy -> draft ~10 villagers into the army
+; to free pop space; stand them down when space returns.
+(defrule
+	(goal gl-overboom off)
+	(current-age >= castle-age)
+	(population-headroom < 10)
+	(civilian-population > 120)
+=>
+	(set-goal gl-overboom on)
+	(set-strategic-number sn-allow-civilian-offense 2)
+	(set-strategic-number sn-allow-civilian-defense 3)
+	(set-strategic-number sn-number-civilian-militia 10)
+	(chat-to-player my-player-number "[MASTER] Overboom: 10 villagers drafted")
+)
+(defrule
+	(goal gl-overboom on)
+	(or (population-headroom > 15) (civilian-population < 110))
+=>
+	(set-goal gl-overboom off)
+	(set-strategic-number sn-allow-civilian-offense 0)
+	(set-strategic-number sn-allow-civilian-defense 1)
+	(set-strategic-number sn-number-civilian-militia 0)
+	(chat-to-player my-player-number "[MASTER] Overboom released")
 )
 ;endregion
 
@@ -531,6 +577,16 @@
 	(set-strategic-number sn-wood-gatherer-percentage 38)
 	(set-strategic-number sn-gold-gatherer-percentage 6)
 	(set-strategic-number sn-stone-gatherer-percentage 0)
+)
+; CLICKING CASTLE (either plan): start stone now so TCs/castle can go up on arrival.
+(defrule
+	(current-age == feudal-age)
+	(up-research-status c: castle-age c:>= research-pending)
+=>
+	(set-strategic-number sn-food-gatherer-percentage 46)
+	(set-strategic-number sn-wood-gatherer-percentage 34)
+	(set-strategic-number sn-gold-gatherer-percentage 12)
+	(set-strategic-number sn-stone-gatherer-percentage 8)
 )
 
 ; Castle Age: KNIGHT eco — keep >=12 on wood (TCs/LCs/farms), good gold, light stone.
@@ -642,9 +698,11 @@
 
 ; Lumber camps: 1 by ~8 vils, 2 in Feudal, 3 in Castle, +1 whenever wood drifts >3.
 (defrule (building-type-count-total lumber-camp < 1)(civilian-population >= 8)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1) => (build lumber-camp))
-(defrule (current-age >= feudal-age)(building-type-count-total lumber-camp < 2)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1)(wood-amount > 100) => (build lumber-camp))
-(defrule (current-age >= castle-age)(building-type-count-total lumber-camp < 3)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1)(wood-amount > 100) => (build lumber-camp))
-(defrule (building-type-count-total lumber-camp >= 1)(dropsite-min-distance wood > 3)(up-pending-objects c: lumber-camp < 1)(can-build lumber-camp) => (build lumber-camp))
+; Each new lumber camp EXTENDS the reach (Bambi: c:+ 2 per camp) — otherwise once the
+; near forest is chopped, placement fails forever and the AI churns camps it can't place.
+(defrule (current-age >= feudal-age)(building-type-count-total lumber-camp < 2)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1)(wood-amount > 100) => (build lumber-camp)(up-modify-sn sn-lumber-camp-max-distance c:+ 3)(up-modify-sn sn-camp-max-distance c:+ 2))
+(defrule (current-age >= castle-age)(building-type-count-total lumber-camp < 3)(can-build lumber-camp)(up-pending-objects c: lumber-camp < 1)(wood-amount > 100) => (build lumber-camp)(up-modify-sn sn-lumber-camp-max-distance c:+ 3)(up-modify-sn sn-camp-max-distance c:+ 2))
+(defrule (building-type-count-total lumber-camp >= 1)(dropsite-min-distance wood > 3)(up-pending-objects c: lumber-camp < 1)(can-build lumber-camp) => (build lumber-camp)(up-modify-sn sn-lumber-camp-max-distance c:+ 3)(up-modify-sn sn-camp-max-distance c:+ 2))
 
 (defrule
 	(building-type-count-total mill == 0)
@@ -665,9 +723,9 @@
 	(can-build mining-camp)
 => (build mining-camp))
 
-; Stone mining camp only IN Castle Age (where we actually mine stone).
+; Stone mining camp from the CASTLE CLICK on (stone ready when we arrive).
 (defrule
-	(current-age >= castle-age)
+	(or (current-age >= castle-age) (up-research-status c: castle-age c:>= research-pending))
 	(dropsite-min-distance stone > 5)
 	(resource-found stone)
 	(up-pending-objects c: mining-camp < 1)
@@ -702,7 +760,8 @@
 => (build barracks))
 
 (defrule (current-age >= feudal-age)(building-type-count-total stable < 1)(can-build stable)(up-pending-objects c: stable < 1) => (build stable))
-(defrule (current-age >= castle-age)(building-type-count-total stable < 3)(can-build stable)(up-pending-objects c: stable < 1)(wood-amount > 175) => (build stable))
+; Extra stables only AFTER the 3-TC boom (a 2nd stable with a starving eco does nothing).
+(defrule (current-age >= castle-age)(building-type-count-total town-center >= 3)(building-type-count-total stable < 3)(can-build stable)(up-pending-objects c: stable < 1)(wood-amount > 175) => (build stable))
 
 (defrule (current-age >= feudal-age)(building-type-count-total stable > 0)(building-type-count-total blacksmith < 1)(can-build blacksmith)(up-pending-objects c: blacksmith < 1) => (build blacksmith))
 
@@ -724,14 +783,16 @@
 	(up-pending-objects c: archery-range < 1)
 => (build archery-range))
 
-; Market/University wait for the BOOM (2nd/3rd TC first — they were stealing its wood).
-(defrule (current-age >= castle-age)(building-type-count-total town-center >= 2)(building-type-count-total market < 1)(can-build market)(up-pending-objects c: market < 1)(wood-amount > 175) => (build market))
+; Market/University wait for the BOOM + MONASTERY (1v1: relics before trade)...
+(defrule (current-age >= castle-age)(building-type-count-total town-center >= 3)(building-type-count-total monastery >= 1)(building-type-count-total market < 1)(can-build market)(up-pending-objects c: market < 1)(wood-amount > 175) => (build market))
+; ...EXCEPT as an emergency trade post when floating food but starving for gold.
+(defrule (current-age >= castle-age)(food-amount > 1400)(gold-amount < 350)(building-type-count-total market < 1)(can-build market)(up-pending-objects c: market < 1) => (build market))
 (defrule (current-age >= castle-age)(building-type-count-total town-center >= 3)(building-type-count-total university < 1)(can-build university)(up-pending-objects c: university < 1)(wood-amount > 200) => (build university))
-(defrule (current-age >= castle-age)(building-type-count-total siege-workshop < 1)(can-build siege-workshop)(up-pending-objects c: siege-workshop < 1)(military-population > 8) => (build siege-workshop))
+(defrule (current-age >= castle-age)(building-type-count-total town-center >= 3)(building-type-count-total siege-workshop < 1)(can-build siege-workshop)(up-pending-objects c: siege-workshop < 1)(military-population > 8) => (build siege-workshop))
 
-(defrule (current-age >= castle-age)(building-type-count-total castle < 1)(can-build castle)(up-pending-objects c: castle < 1) => (build castle))
+(defrule (current-age >= castle-age)(building-type-count-total castle < 1)(can-build castle)(up-pending-objects c: castle < 1) => (up-assign-builders c: castle c: 4)(build castle)(chat-to-player my-player-number "[MASTER] Placing castle"))
 ; 2nd Castle when stone piles (forward/defensive) instead of hoarding stone.
-(defrule (current-age >= castle-age)(building-type-count-total castle < 2)(stone-amount > 650)(can-build castle)(up-pending-objects c: castle < 1) => (build castle))
+(defrule (current-age >= castle-age)(building-type-count-total castle < 2)(stone-amount > 650)(can-build castle)(up-pending-objects c: castle < 1) => (up-assign-builders c: castle c: 4)(build castle)(chat-to-player my-player-number "[MASTER] Placing castle 2"))
 ;endregion
 
 ;region ANTI-CAVALRY EXTRAS =======================================================
@@ -742,6 +803,12 @@
 	(can-train spearman-line)
 	(unit-type-count-total spearman-line < 8)
 => (train spearman-line))
+
+; Keep monks OUT of fights: aggressive army settings were dragging them along, which
+; blocks their default first task — collecting relics.
+(defrule
+	(unit-type-count monk > 0)
+=> (up-set-attack-stance monk c: stance-no-attack))
 ;endregion
 
 ;region FEUDAL FORK: SCOUT RUSH vs FAST CASTLE ====================================
@@ -831,10 +898,8 @@
 ;endregion
 
 ;region RESEARCH: ECONOMY ==========================================================
-(defrule
-	(or (food-amount < 45) (or (civilian-population >= 20) (or (town-under-attack) (up-enemy-units-in-town > 0))))
-	(can-research ri-loom)
-=> (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom"))
+; (Loom moved ABOVE villager production — Panda's tutorial rule: it can never win the
+;  TC slot from below the villager rule.)
 
 (defrule (can-research ri-double-bit-axe) => (research ri-double-bit-axe))
 (defrule (can-research ri-horse-collar)   => (research ri-horse-collar))
@@ -862,19 +927,21 @@
 => (research ri-hand-cart))
 
 (defrule (or (current-age >= castle-age) (up-research-status c: castle-age c:>= research-pending))(can-research ri-gold-mining) => (research ri-gold-mining))
-(defrule (current-age >= castle-age)(can-research ri-gold-shaft-mining) => (research ri-gold-shaft-mining))
+(defrule (current-age >= imperial-age)(can-research ri-gold-shaft-mining) => (research ri-gold-shaft-mining))  ; bottom of the list
 (defrule (current-age >= imperial-age)(can-research ri-two-man-saw)       => (research ri-two-man-saw))
 (defrule (current-age >= imperial-age)(can-research ri-stone-mining)      => (research ri-stone-mining))
 ;endregion
 
 ;region RESEARCH: BLACKSMITH (ONLY once we own the relevant unit) ==================
 ; Melee attack/armour — gate on owning cavalry (scouts/knights) or throwing axemen.
-(defrule (or (unit-type-count-total scout-cavalry-line > 0) (or (unit-type-count-total knight-line > 0) (unit-type-count-total throwing-axeman-line > 0))) (can-research ri-forging) => (research ri-forging))
+; Weapon/armour techs need a REAL army (one scouting scout must not trigger them —
+; during Fast Castle they'd waste the food and delay the click).
+(defrule (or (unit-type-count-total scout-cavalry-line >= 3) (or (unit-type-count-total knight-line >= 2) (unit-type-count-total throwing-axeman-line > 0))) (can-research ri-forging) => (research ri-forging))
 (defrule (research-completed ri-forging)(can-research ri-iron-casting)  => (research ri-iron-casting))
 (defrule (research-completed ri-iron-casting)(can-research ri-blast-furnace) => (research ri-blast-furnace))
-(defrule (or (unit-type-count-total scout-cavalry-line > 0) (unit-type-count-total knight-line > 0)) (can-research ri-bloodlines) => (research ri-bloodlines))
-(defrule (or (unit-type-count-total scout-cavalry-line > 0) (unit-type-count-total knight-line > 0)) (can-research ri-husbandry)  => (research ri-husbandry))
-(defrule (or (unit-type-count-total scout-cavalry-line > 0) (unit-type-count-total knight-line > 0)) (can-research ri-scale-barding) => (research ri-scale-barding))
+(defrule (or (unit-type-count-total scout-cavalry-line >= 3) (unit-type-count-total knight-line >= 2)) (can-research ri-bloodlines) => (research ri-bloodlines))
+(defrule (or (unit-type-count-total scout-cavalry-line >= 3) (unit-type-count-total knight-line >= 2)) (can-research ri-husbandry)  => (research ri-husbandry))
+(defrule (or (unit-type-count-total scout-cavalry-line >= 3) (unit-type-count-total knight-line >= 2)) (can-research ri-scale-barding) => (research ri-scale-barding))
 (defrule (research-completed ri-scale-barding)(can-research ri-chain-barding) => (research ri-chain-barding))
 (defrule (research-completed ri-chain-barding)(can-research ri-plate-barding) => (research ri-plate-barding))
 ; Archer armour — ONLY if we own skirms/archers.
@@ -1121,13 +1188,24 @@
 		(up-compare-goal gl-home-threat >= 3)
 		(and (town-under-attack) (strategic-number sn-maximum-town-size <= 26))
 	)
+	(goal gl-overboom off)
 	(strategic-number sn-number-civilian-militia != 8)
 => (set-strategic-number sn-number-civilian-militia 8))
 (defrule
 	(up-compare-goal gl-home-threat < 3)
 	(not (town-under-attack))
+	(goal gl-overboom off)
 	(strategic-number sn-number-civilian-militia != 0)
 => (set-strategic-number sn-number-civilian-militia 0))
+; Defensive towers when the home is genuinely raided (Fletching already boosts them).
+(defrule
+	(up-compare-goal gl-home-threat >= 3)
+	(current-age >= feudal-age)
+	(stone-amount >= 130)
+	(building-type-count-total watch-tower < 3)
+	(can-build watch-tower)
+	(up-pending-objects c: watch-tower < 1)
+=> (build watch-tower))
 ;endregion
 
 ;region MARKET FAIL-SAFES & DYNAMIC TRADING =======================================
@@ -1142,6 +1220,13 @@
 	(gold-amount < 100)(wood-amount > 650)
 	(can-sell-commodity wood)
 => (sell-commodity wood))
+; FLOAT CONVERTER (Bambi-style): a huge stockpile while gold-short (age-up, knights)
+; is dead value — sell it down at the market.
+(defrule (current-age >= castle-age)(food-amount > 1200)(gold-amount < 450)(can-sell-commodity food) => (sell-commodity food))
+(defrule (current-age >= castle-age)(wood-amount > 900)(gold-amount < 450)(can-sell-commodity wood) => (sell-commodity wood))
+; HARD ANTI-FLOAT: past these levels the stockpile is dead value no matter what.
+(defrule (food-amount > 2000)(can-sell-commodity food) => (sell-commodity food))
+(defrule (wood-amount > 1600)(can-sell-commodity wood) => (sell-commodity wood))
 (defrule
 	(current-age >= castle-age)(building-type-count-total castle == 0)
 	(stone-amount < 500)(wood-amount > 250)(gold-amount > 200)(can-buy-commodity stone)
