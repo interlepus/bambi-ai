@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.4
+; THE MASTER - v2.5
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -36,8 +36,15 @@
 ;  * gl-enemy-ranged triggers on REAL enemy archers (not on a wolf attack); Fletching
 ;    first when attacked; stone mining camp + market deferred to Castle (used, not wasted).
 ;  * Monastery + monks for relic gold once we have 3 TCs; 2nd Castle when stone piles.
-;  Franks notes (from research): top-tier Knights (+2 LOS, no Bloodlines cost), cheap
-;  forward castle, free farms, weak archers -> SKIRMS for defence; camels hard-counter us.
+;  FRANKS TECH BOOK (verified from wiki pages, v2.5 self-study):
+;   HAVE: Cavalier+Paladin, full Champions AND Halberdiers, Elite Throwing Axeman,
+;         Siege Engineers, Bombard Cannon (needs Chemistry), monks (no Atonement/Redemp.),
+;         UTs: Bearded Axe (+1 axemen range) & Chivalry (stables +40% speed). Free farms.
+;   MISS: Bloodlines, Bracer, Thumb Ring, Ring Archer Armor, HUSSAR, Siege Onager,
+;         Siege Ram, Keep, Bombard Tower. Foragers +15% (DE nerf from 25%).
+;   DOCTRINE: "Franks fizzle out in trash wars" -> END games on the gold army
+;   (Knights/Paladin + Axemen + BBC), funded by relics + fresh mines. Kill enemy monks
+;   first (they eat Paladins). Camels hard-counter us -> pikes/axemen answer.
 ;
 ; NOTE TO SELF: AoE2 and/or/nand are BINARY (exactly 2 args) — nest, never list 3+.
 ; >>> DEBUG: flip gl-debug to "off" at the rule marked [DEBUG TOGGLE] to silence.
@@ -45,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.4 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.5 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -72,6 +79,7 @@
 (defconst gl-enemy-cavalry 24)     ; enemy fields massed knights
 
 (defconst priority-offense 0)      ; for up-reset-target-priorities
+(defconst ri-bearded-axe 83)       ; Franks Castle UT (+1 Throwing Axeman range) — id per Sol/refs
 (defconst all-units-class -1)      ; any-unit class for DUC searches
 (defconst enemy 3)                 ; player stance group for up-find-player
 (defconst find-closest 2)          ; up-find-player mode
@@ -830,6 +838,7 @@
 (defrule (can-research ri-paladin)  => (research ri-paladin))
 (defrule (can-research ri-chivalry) => (research ri-chivalry))
 (defrule (unit-type-count-total throwing-axeman-line > 0)(can-research ri-elite-throwing-axeman) => (research ri-elite-throwing-axeman))
+(defrule (unit-type-count-total throwing-axeman-line > 2)(can-research ri-bearded-axe) => (research ri-bearded-axe))
 (defrule (unit-type-count-total skirmisher-line > 0)(can-research ri-elite-skirmisher) => (research ri-elite-skirmisher))
 (defrule (unit-type-count-total spearman-line > 0)(can-research ri-pikeman) => (research ri-pikeman))
 ;endregion
@@ -844,7 +853,41 @@
 	(or (building-type-count-total watch-tower > 0) (building-type-count-total castle > 0))
 	(can-research ri-murder-holes)
 => (research ri-murder-holes))
+; Ballistics helps PROJECTILES (TC/castle/skirms) — not knights. Gate accordingly.
+(defrule
+	(or (unit-type-count-total skirmisher-line > 2) (building-type-count-total castle > 0))
+	(can-research ri-ballistics)
+=> (research ri-ballistics))
 (defrule (current-age >= imperial-age)(can-research ri-architecture) => (research ri-architecture))
+
+; IMPERIAL POWER SPIKE (v2.5 self-study): Franks lack Siege Onager/Ram but HAVE
+; Chemistry -> Bombard Cannon, Siege Engineers, Conscription, Hoardings.
+(defrule
+	(current-age >= imperial-age)
+	(or (unit-type-count-total skirmisher-line > 0) (building-type-count-total castle > 0))
+	(can-research ri-chemistry)
+=> (research ri-chemistry))
+(defrule (building-type-count-total castle > 0)(can-research ri-conscription) => (research ri-conscription))
+(defrule (building-type-count-total castle > 0)(can-research ri-hoardings)    => (research ri-hoardings))
+(defrule
+	(or (unit-type-count-total battering-ram-line > 0) (or (unit-type-count-total mangonel-line > 0) (unit-type-count-total bombard-cannon > 0)))
+	(can-research ri-siege-engineers)
+=> (research ri-siege-engineers))
+(defrule
+	(current-age >= imperial-age)
+	(research-completed ri-chemistry)
+	(building-type-count siege-workshop > 0)
+	(can-train bombard-cannon)
+	(unit-type-count-total bombard-cannon < 2)
+=> (train bombard-cannon))
+; Scorpions complement our forces vs massed infantry/spears (no Siege Onager to do it).
+(defrule
+	(goal gl-enemy-anti-cav on)
+	(current-age >= castle-age)
+	(building-type-count siege-workshop > 0)
+	(can-train scorpion-line)
+	(unit-type-count-total scorpion-line < 3)
+=> (train scorpion-line))
 ;endregion
 
 ;region DEFENCE: detect threats (real units only) =================================
