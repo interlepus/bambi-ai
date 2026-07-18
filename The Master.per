@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.9.6
+; THE MASTER - v2.9.7
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -52,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.6 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.7 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -375,13 +375,16 @@
 	; under attack, or ANY enemy unit in town (even a scout can snipe villagers).
 	(or
 		(and (up-pending-objects c: villager == 0) (or (food-amount < 50) (housing-headroom == 0)))
-		(or (town-under-attack) (up-enemy-units-in-town > 0))
+		(or
+			(and (town-under-attack) (not (up-attacker-class == gaia)))
+			(up-enemy-units-in-town > 0)
+		)
 	)
 	(can-research ri-loom)
 => (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom"))
 
 ; PRIORITY DEFENSIVE TECHS — when actually threatened these outrank everything below.
-(defrule (town-under-attack)(can-research ri-fletching) => (research ri-fletching))
+(defrule (town-under-attack)(not (up-attacker-class == gaia))(can-research ri-fletching) => (research ri-fletching))
 (defrule (goal gl-enemy-ranged on)(unit-type-count-total skirmisher-line > 0)(can-research ri-elite-skirmisher) => (research ri-elite-skirmisher))
 (defrule (goal gl-enemy-ranged on)(unit-type-count-total skirmisher-line > 0)(can-research ri-padded-archer-armor) => (research ri-padded-archer-armor))
 ;endregion
@@ -993,7 +996,7 @@
 
 ;region RESEARCH: DEFENSIVE / UNIVERSITY ==========================================
 ; Fletching FIRST when attacked — boosts TC/tower (and any skirm/archer) arrows.
-(defrule (town-under-attack)(can-research ri-fletching) => (research ri-fletching))
+(defrule (town-under-attack)(not (up-attacker-class == gaia))(can-research ri-fletching) => (research ri-fletching))
 (defrule (or (unit-type-count-total skirmisher-line > 0) (unit-type-count-total archer-line > 0))(can-research ri-bodkin-arrow) => (research ri-bodkin-arrow))
 (defrule (can-research ri-masonry)        => (research ri-masonry))
 ; Murder Holes only when we actually OWN fortifications (useless before).
@@ -1083,6 +1086,7 @@
 ; Defensive scouts when attacked (fast, good vs archers) — any plan.
 (defrule
 	(current-age == feudal-age)(town-under-attack)(food-amount > 80)
+	(not (up-attacker-class == gaia))
 	(can-train scout-cavalry-line)
 	(unit-type-count-total scout-cavalry-line < 5)
 => (train scout-cavalry-line))
@@ -1214,7 +1218,10 @@
 (defrule
 	(or
 		(up-compare-goal gl-home-threat >= 3)
-		(and (town-under-attack) (strategic-number sn-maximum-town-size <= 26))
+		(and
+			(town-under-attack)
+			(and (not (up-attacker-class == gaia)) (strategic-number sn-maximum-town-size <= 26))
+		)
 	)
 	(goal gl-overboom off)
 	(strategic-number sn-number-civilian-militia != 8)
