@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.7
+; THE MASTER - v2.8
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -52,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.7 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.8 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -77,6 +77,8 @@
 (defconst gl-home-threat 19)       ; enemy units near ORIGINAL home (fixed-home scan)
 (defconst gl-search-base 20)       ; up-get-search-state writes 20..23 — keep reserved
 (defconst gl-enemy-cavalry 24)     ; enemy fields massed knights
+(defconst gl-scan-tick 25)         ; 1 = a home-scan tick is due this pass
+(defconst building-class 903)      ; generic building class for DUC searches
 
 (defconst priority-offense 0)      ; for up-reset-target-priorities
 (defconst ri-bearded-axe 83)       ; Franks Castle UT (+1 Throwing Axeman range) — id per Sol/refs
@@ -107,6 +109,7 @@
 	(set-goal gl-scrush 0)
 	(set-goal gl-home-threat 0)
 	(set-goal gl-enemy-cavalry off)
+	(set-goal gl-target-player 0)
 	(disable-self)
 )
 (defrule (true) => (enable-timer timer-debug 20) (disable-self))
@@ -128,12 +131,14 @@
 	(disable-self)
 )
 
-; Record the ORIGINAL home point + find our 1v1 opponent, then start the home scan.
+; Record the ORIGINAL home point, then start the home scan. (The enemy is re-found on
+; EVERY scan tick — v2.7 found it once at 0:05, when nothing is scouted yet, so the
+; target stayed 0 and the scan never ran: home-threat was permanently 0.)
 (defrule
 	(game-time > 5)
 =>
 	(up-get-point position-self gl-home-x)
-	(up-find-player enemy find-closest gl-target-player)
+	(set-goal gl-scan-tick 0)
 	(enable-timer timer-homescan 4)
 	(disable-self)
 )
@@ -143,22 +148,47 @@
 ; Count enemy units within 36 tiles of the ORIGINAL home point. This stays accurate
 ; when the town radius has grown toward the enemy — fighting at THEIR base can no
 ; longer masquerade as a raid on ours.
+; Tick: re-find the enemy player fresh each cycle, then flag the scan.
 (defrule
 	(timer-triggered timer-homescan)
-	(up-compare-goal gl-target-player > 0)
 =>
 	(disable-timer timer-homescan)
+	(up-find-player enemy find-closest gl-target-player)
+	(set-goal gl-scan-tick 1)
+	(enable-timer timer-homescan 4)
+)
+; Scan: count enemy units AND buildings (a forward tower is a threat!) near home.
+(defrule
+	(goal gl-scan-tick 1)
+	(up-compare-goal gl-target-player > 0)
+=>
+	(set-goal gl-scan-tick 0)
 	(up-modify-sn sn-focus-player-number g:= gl-target-player)
 	(up-full-reset-search)
 	(up-set-target-point gl-home-x)
 	(up-filter-distance c: -1 c: 36)
 	(up-find-remote c: all-units-class c: 40)
+	(up-find-remote c: building-class c: 10)
 	(up-get-search-state gl-search-base)
 	(up-modify-goal gl-home-threat c:= 0)
 	(up-modify-goal gl-home-threat g:+ gl-search-remote-count)
 	(set-strategic-number sn-focus-player-number 0)
 	(up-full-reset-search)
-	(enable-timer timer-homescan 4)
+)
+; No enemy identified yet -> clear the tick and report 0 (accurate: nothing seen).
+(defrule
+	(goal gl-scan-tick 1)
+	(up-compare-goal gl-target-player <= 0)
+=>
+	(set-goal gl-scan-tick 0)
+)
+; One-shot confirmation that the scan engine is alive.
+(defrule
+	(goal gl-debug on)
+	(up-compare-goal gl-target-player > 0)
+=>
+	(up-chat-data-to-self "[MASTER] scan online: enemy is player %d" g: gl-target-player)
+	(disable-self)
 )
 ;endregion
 
