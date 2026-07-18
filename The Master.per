@@ -1,8 +1,16 @@
 ;==================================================================================
-; THE MASTER - v2.9.10
+; THE MASTER - v2.9.11
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
+;
+; v2.9.11 — LOOM ANOMALY SOLVED: up-enemy-units-in-town counts GAIA. airef defines it
+;  as "targetable enemy units in town" — a STATIC boar/wolf inside the town radius
+;  satisfies it the moment the scout reveals it (fired with the real enemy ~60 tiles
+;  away, two games running; setting sn-target-player-number did NOT cure it, so the
+;  fact ignores target/focus entirely). Fact REMOVED from Loom — our own home scan
+;  (focused-player DUC count, gaia impossible) is the only enemy-in-town authority.
+;  A one-shot debug SENSOR still stamps the second the raw engine fact flips true.
 ;
 ; v2.0 — major upgrade after studying Sol (ChatGPT's competing AI), Rehoboam & co:
 ;  * FIXED-HOME THREAT SCAN (idea from Sol): DUC-counts enemy units around our ORIGINAL
@@ -47,12 +55,14 @@
 ;   first (they eat Paladins). Camels hard-counter us -> pikes/axemen answer.
 ;
 ; NOTE TO SELF: AoE2 and/or/nand are BINARY (exactly 2 args) — nest, never list 3+.
+; NOTE TO SELF: up-enemy-units/villagers-in-town count TARGETABLE units, gaia included
+;  (boar/wolf!). Only up-enemy-buildings-in-town is gaia-proof — Bambi uses ONLY that.
 ; >>> DEBUG: flip gl-debug to "off" at the rule marked [DEBUG TOGGLE] to silence.
 ;==================================================================================
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.10 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.11 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -162,9 +172,10 @@
 	(set-goal gl-scan-tick 1)
 	(enable-timer timer-homescan 4)
 )
-; Point the engine's TARGET at the real enemy (Bambi does this too). Without it,
-; sn-target-player-number stays 0 and up-enemy-units-in-town counts GAIA — a wandering
-; boar read as "enemy in town" (diagnosed via the split-Loom instrumentation).
+; Point the engine's TARGET at the real enemy (Bambi does this too) so targeting and
+; attack grouping never run with target 0. NOTE: this does NOT sanitize
+; up-enemy-units-in-town — v2.9.9 proved it (target set, boar still counted). That
+; fact tallies any TARGETABLE non-ally unit in town, gaia included. See Loom region.
 (defrule
 	(up-compare-goal gl-target-player > 0)
 	(strategic-number sn-target-player-number == 0)
@@ -395,15 +406,26 @@
 	(not (up-attacker-class == gaia))
 	(can-research ri-loom)
 => (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom: town under attack"))
-; Enemy-in-town must be VISIBLY confirmed by our own home scan (home-threat counts
-; only enemy objects we can actually see near the original home). up-enemy-units-in-town
-; alone fired with an empty minimap two games running — fogged/engine counting we
-; cannot audit. Our scan is the authority.
+; Enemy-in-town = our own home scan sees >=1 object of the FOCUSED real enemy near
+; the ORIGINAL home point (visible only, gaia impossible by construction).
+; v2.9.11: up-enemy-units-in-town REMOVED — airef documents it as "targetable enemy
+; units in town": gaia is NOT excluded, so the static boar near the TC satisfied it
+; the moment the scout revealed it (real enemy ~60 tiles away, two games running).
+; Bambi never uses the units variant — only up-enemy-buildings-in-town (gaia-proof).
 (defrule
 	(up-compare-goal gl-home-threat >= 1)
-	(up-enemy-units-in-town > 0)
 	(can-research ri-loom)
 => (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom: enemy in town"))
+; SENSOR (debug-only, one-shot, NO gameplay effect): stamp the second the raw engine
+; fact first flips true, to confirm on the replay it coincides with the boar reveal.
+(defrule
+	(goal gl-debug on)
+	(up-enemy-units-in-town > 0)
+=>
+	(up-get-fact game-time 0 gl-tmp)
+	(up-chat-data-to-self "[MASTER] sensor: raw enemy-in-town fact fired at %d s" g: gl-tmp)
+	(disable-self)
+)
 
 ; PRIORITY DEFENSIVE TECHS — when actually threatened these outrank everything below.
 (defrule (town-under-attack)(not (up-attacker-class == gaia))(can-research ri-fletching) => (research ri-fletching))
