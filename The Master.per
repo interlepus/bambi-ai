@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.9.9
+; THE MASTER - v2.9.10
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -52,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.9 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.10 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -395,8 +395,12 @@
 	(not (up-attacker-class == gaia))
 	(can-research ri-loom)
 => (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom: town under attack"))
+; Enemy-in-town must be VISIBLY confirmed by our own home scan (home-threat counts
+; only enemy objects we can actually see near the original home). up-enemy-units-in-town
+; alone fired with an empty minimap two games running — fogged/engine counting we
+; cannot audit. Our scan is the authority.
 (defrule
-	(up-compare-goal gl-target-player > 0)
+	(up-compare-goal gl-home-threat >= 1)
 	(up-enemy-units-in-town > 0)
 	(can-research ri-loom)
 => (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom: enemy in town"))
