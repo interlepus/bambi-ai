@@ -1,5 +1,5 @@
 ;==================================================================================
-; THE MASTER - v2.9
+; THE MASTER - v2.9.3
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -52,7 +52,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.3 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -370,7 +370,10 @@
 
 ; LOOM — above villager production so it can actually claim the TC (Panda's rule).
 (defrule
-	(or (food-amount < 45) (or (civilian-population >= 20) (or (town-under-attack) (up-enemy-units-in-town > 0))))
+	(or
+		(and (food-amount < 45) (up-pending-objects c: villager == 0))
+		(or (civilian-population >= 20) (or (town-under-attack) (up-enemy-units-in-town > 0)))
+	)
 	(can-research ri-loom)
 => (research ri-loom)(chat-to-player my-player-number "[MASTER] Loom"))
 
@@ -1244,11 +1247,11 @@
 => (sell-commodity wood))
 ; FLOAT CONVERTER (Bambi-style): a huge stockpile while gold-short (age-up, knights)
 ; is dead value — sell it down at the market.
-(defrule (current-age >= castle-age)(food-amount > 1200)(gold-amount < 450)(can-sell-commodity food) => (sell-commodity food))
-(defrule (current-age >= castle-age)(wood-amount > 900)(gold-amount < 450)(can-sell-commodity wood) => (sell-commodity wood))
+(defrule (current-age >= castle-age)(food-amount > 1500)(gold-amount < 450)(strategic-number sn-food-gatherer-percentage <= 30)(can-sell-commodity food) => (sell-commodity food))
+(defrule (current-age >= castle-age)(wood-amount > 1200)(gold-amount < 450)(strategic-number sn-wood-gatherer-percentage <= 25)(can-sell-commodity wood) => (sell-commodity wood))
 ; HARD ANTI-FLOAT: past these levels the stockpile is dead value no matter what.
-(defrule (food-amount > 2000)(can-sell-commodity food) => (sell-commodity food))
-(defrule (wood-amount > 1600)(can-sell-commodity wood) => (sell-commodity wood))
+(defrule (food-amount > 2200)(can-sell-commodity food) => (sell-commodity food))
+(defrule (wood-amount > 1800)(can-sell-commodity wood) => (sell-commodity wood))
 (defrule
 	(current-age >= castle-age)(building-type-count-total castle == 0)
 	(stone-amount < 500)(wood-amount > 250)(gold-amount > 200)(can-buy-commodity stone)
