@@ -1,8 +1,24 @@
 ;==================================================================================
-; THE MASTER - v2.9.13
+; THE MASTER - v2.9.14
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
+;
+; v2.9.14 — COUNTER-SYSTEM AUDIT vs the counter matrix (user review):
+;  * ELEPHANTS WERE INVISIBLE: detection only counted knight/spear/camel/archer/
+;    skirm/scout LINES. Battle elephants (class 24) and elephant archers (class 26)
+;    triggered nothing — no spears vs elephants, ever. Now: elephants >= 2 ->
+;    gl-enemy-cavalry (halbs + monks); elephant archers >= 3 -> gl-enemy-ranged
+;    (skirms). Both classes added to the home scan too.
+;  * MONKS COULD NEVER CONVERT: always-no-attack stance (for relic runs) disabled
+;    the conversion counter. Stance is now threat-aware: defensive vs knights/
+;    elephants, no-attack in peace.
+;  * Enemy INFANTRY MASS (militia/eagles, class 6) now detected -> Axemen + scorps.
+;  * STONE (user): TC = 275w+100s, towers 125s each — replenish stone while < 220
+;    (no 3rd TC) or < 300 (towers placed) so the 3-TC boom never stalls on stone.
+;  * ECO FIRST (user): army rules had no headroom gate, so under housing pressure
+;    soldiers ate the last pop slots while the villager rule (headroom > 0) waited.
+;    Standing army now needs >4 headroom, reactive counters >2, feudal defence free.
 ;
 ; v2.9.13 — HOME-THREAT PERMANENTLY 0 SOLVED: the scan's core find used
 ;  (up-find-remote c: all-units-class c: 40) — but the -1 wildcard is documented
@@ -79,7 +95,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.13 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.14 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -131,6 +147,10 @@
 (defconst mclass-scout 947)        ; scout-cavalry line
 (defconst mclass-spear 950)        ; spearmen (own genie class)
 (defconst mclass-tower 952)        ; towers are class 52 — NOT building-class 3
+(defconst mclass-war-elephant 924) ; battle/war elephants (own class — NOT cavalry 12!)
+(defconst mclass-elephant-archer 926)
+(defconst stance-defensive 1)      ; up-set-attack-stance: fight what comes close
+(defconst gl-enemy-infantry 30)    ; on = enemy masses militia-line/eagles
 (defconst enemy 3)                 ; player stance group for up-find-player
 (defconst find-closest 2)          ; up-find-player mode
 (defconst gl-search-remote-count 22) ; 3rd of the 4 consecutive search-state goals
@@ -161,6 +181,7 @@
 	(set-goal gl-target-player 0)
 	(set-goal gl-overboom off)
 	(set-goal gl-towers-avoided off)
+	(set-goal gl-enemy-infantry off)
 	(disable-self)
 )
 (defrule (true) => (enable-timer timer-debug 20) (disable-self))
@@ -241,11 +262,13 @@
 	(up-find-remote c: mclass-spear c: 40)
 	(up-find-remote c: mclass-pike c: 40)
 	(up-find-remote c: mclass-cav-archer c: 40)
+	(up-find-remote c: mclass-war-elephant c: 40)
 )
 (defrule
 	(goal gl-scan-tick 2)
 =>
 	(set-goal gl-scan-tick 0)
+	(up-find-remote c: mclass-elephant-archer c: 40)
 	(up-find-remote c: mclass-hand-cannon c: 40)
 	(up-find-remote c: mclass-siege c: 40)
 	(up-find-remote c: mclass-petard c: 40)
@@ -411,13 +434,15 @@
 => (build monastery))
 (defrule
 	(building-type-count monastery > 0)
+	(population-headroom > 4)
 	(can-train monk)
 	(unit-type-count-total monk < 3)
 => (train monk))
-; Extra monks vs massed enemy knights (conversion defence).
+; Extra monks vs massed enemy knights/elephants (conversion defence).
 (defrule
 	(goal gl-enemy-cavalry on)
 	(building-type-count monastery > 0)
+	(population-headroom > 4)
 	(can-train monk)
 	(unit-type-count-total monk < 5)
 => (train monk))
@@ -756,6 +781,14 @@
 ; Stone PILE -> stop over-mining stone, put it on wood.
 (defrule (stone-amount > 600)(strategic-number sn-stone-gatherer-percentage > 2)
 => (up-modify-sn sn-stone-gatherer-percentage c:- 4)(up-modify-sn sn-wood-gatherer-percentage c:+ 4))
+; Stone SHORT while booming (user, v2.9.14): a TC is 275w+100s and every defensive
+; tower ate 125s — replenish while low or TC#3 stalls waiting on stone.
+(defrule (current-age >= castle-age)(building-type-count-total town-center < 3)(stone-amount < 220)
+	(strategic-number sn-stone-gatherer-percentage < 10)
+=> (up-modify-sn sn-stone-gatherer-percentage c:+ 5)(up-modify-sn sn-food-gatherer-percentage c:- 5))
+(defrule (current-age >= castle-age)(building-type-count-total watch-tower > 0)(stone-amount < 300)
+	(strategic-number sn-stone-gatherer-percentage < 12)
+=> (up-modify-sn sn-stone-gatherer-percentage c:+ 4)(up-modify-sn sn-food-gatherer-percentage c:- 4))
 
 ; Camps may reach farther as the map opens up (crowded/exhausted deposits -> new mines).
 (defrule (current-age == castle-age)(strategic-number sn-camp-max-distance < 22)
@@ -959,11 +992,18 @@
 	(unit-type-count-total spearman-line < 8)
 => (train spearman-line))
 
-; Keep monks OUT of fights: aggressive army settings were dragging them along, which
-; blocks their default first task — collecting relics.
+; Monk stance is THREAT-AWARE (v2.9.14): no-attack while peaceful so relic runs are
+; never interrupted — but vs massed knights/elephants they switch to DEFENSIVE and
+; actually convert (matrix: Monk H vs Knight/Camel/Battle Elephant/Elephant Archer;
+; the old always-no-attack stance silently disabled the whole conversion counter).
 (defrule
 	(unit-type-count monk > 0)
+	(goal gl-enemy-cavalry off)
 => (up-set-attack-stance monk c: stance-no-attack))
+(defrule
+	(unit-type-count monk > 0)
+	(goal gl-enemy-cavalry on)
+=> (up-set-attack-stance monk c: stance-defensive))
 ;endregion
 
 ;region FEUDAL FORK: SCOUT RUSH vs FAST CASTLE ====================================
@@ -1160,9 +1200,10 @@
 => (train bombard-cannon))
 ; Scorpions complement our forces vs massed infantry/spears (no Siege Onager to do it).
 (defrule
-	(goal gl-enemy-anti-cav on)
+	(or (goal gl-enemy-anti-cav on) (goal gl-enemy-infantry on))
 	(current-age >= castle-age)
 	(building-type-count siege-workshop > 0)
+	(population-headroom > 4)
 	(can-train scorpion-line)
 	(unit-type-count-total scorpion-line < 3)
 => (train scorpion-line))
@@ -1180,21 +1221,41 @@
 	(goal gl-enemy-anti-cav on)
 => (set-goal gl-enemy-anti-cav off))
 
-; Ranged threat = enemy actually owning archers/skirms (NOT a wolf attack).
+; Ranged threat = enemy actually owning archers/skirms/ELEPHANT ARCHERS (counter
+; matrix: Skirmisher hard-counters Elephant Archer — v2.9.14, class 926 detection;
+; the Bengalis AI we face is exactly an elephant-archer civ).
 (defrule
-	(or (players-unit-type-count any-enemy archer-line >= 4) (players-unit-type-count any-enemy skirmisher-line >= 4))
+	(or (players-unit-type-count any-enemy archer-line >= 4)
+	    (or (players-unit-type-count any-enemy skirmisher-line >= 4)
+	        (players-unit-type-count any-enemy mclass-elephant-archer >= 3)))
 	(goal gl-enemy-ranged off)
 => (set-goal gl-enemy-ranged on))
 
-; Enemy massed knights -> pikes + monks alongside our own knights.
+; Enemy massed knights OR BATTLE ELEPHANTS -> halbs + monks alongside our knights.
+; (Counter matrix: Spearman H and Monk H vs Battle Elephant. Elephants are their own
+;  genie class 24 — knight-line/cavalry-class facts never saw them: that is why no
+;  spears appeared vs elephants. 2 elephants already justify the response.)
 (defrule
-	(players-unit-type-count any-enemy knight-line >= 4)
+	(or (players-unit-type-count any-enemy knight-line >= 4)
+	    (players-unit-type-count any-enemy mclass-war-elephant >= 2))
 	(goal gl-enemy-cavalry off)
 => (set-goal gl-enemy-cavalry on))
 (defrule
 	(players-unit-type-count any-enemy knight-line < 2)
+	(players-unit-type-count any-enemy mclass-war-elephant < 1)
 	(goal gl-enemy-cavalry on)
 => (set-goal gl-enemy-cavalry off))
+
+; Enemy INFANTRY mass (militia-line/eagles, genie class 6 — spears are class 50/46
+; and stay with the anti-cav signal) -> Throwing Axemen + scorpions shred them.
+(defrule
+	(players-unit-type-count any-enemy mclass-infantry >= 6)
+	(goal gl-enemy-infantry off)
+=> (set-goal gl-enemy-infantry on))
+(defrule
+	(players-unit-type-count any-enemy mclass-infantry < 3)
+	(goal gl-enemy-infantry on)
+=> (set-goal gl-enemy-infantry off))
 ;endregion
 
 ;region MILITARY: SCOUTS (plan-aware) + scout defence =============================
@@ -1228,21 +1289,31 @@
 ;endregion
 
 ;region MILITARY: KNIGHTS (core) ==================================================
-(defrule (current-age >= castle-age)(can-train knight-line) => (train knight-line))
+; ECO FIRST (user, v2.9.14): villager rules sit ABOVE the army in rule order, but
+; they also politely require housing headroom — while army rules had NO such gate,
+; so under housing pressure soldiers ate the last pop slots and the TCs idled.
+; Standing army trains only with >4 headroom; reactive counters below yield at >2;
+; feudal defence rules stay ungated (a raid answer outranks one villager).
+(defrule (current-age >= castle-age)(population-headroom > 4)(can-train knight-line) => (train knight-line))
 ;endregion
 
 ;region MILITARY: COUNTERS ========================================================
-; Throwing Axemen (Franks UU) vs enemy spears/camels — they shield the Knights.
+; Throwing Axemen (Franks UU) vs enemy spears/camels AND infantry mass — matrix:
+; ranged attack shreds militia/eagles, and they shield the Knights from spears.
 (defrule
-	(goal gl-enemy-anti-cav on)
+	(or (goal gl-enemy-anti-cav on) (goal gl-enemy-infantry on))
 	(building-type-count castle > 0)
+	(population-headroom > 4)
 	(can-train throwing-axeman-line)
 	(unit-type-count-total throwing-axeman-line < 14)
 => (train throwing-axeman-line))
-; Pikemen (anti-cav) only vs enemy CAMELS, and only the barracks unit (no archers/skirm matchup).
+; Spear-line (-> halbs) vs enemy CAMELS and BATTLE ELEPHANTS (matrix: Spearman H vs
+; both; Franks have full Halberdier). Never vs archer/skirm comps.
 (defrule
-	(players-unit-type-count any-enemy camel-line >= 4)
+	(or (players-unit-type-count any-enemy camel-line >= 4)
+	    (players-unit-type-count any-enemy mclass-war-elephant >= 2))
 	(current-age >= castle-age)
+	(population-headroom > 2)
 	(can-train spearman-line)
 	(unit-type-count-total spearman-line < 10)
 => (train spearman-line))
@@ -1250,6 +1321,7 @@
 (defrule
 	(goal gl-enemy-ranged on)
 	(building-type-count archery-range > 0)
+	(population-headroom > 2)
 	(can-train skirmisher-line)
 	(unit-type-count-total skirmisher-line < 14)
 => (train skirmisher-line))
@@ -1258,6 +1330,7 @@
 	(goal gl-enemy-ranged on)
 	(current-age >= castle-age)
 	(building-type-count siege-workshop > 0)
+	(population-headroom > 4)
 	(can-train mangonel-line)
 	(unit-type-count-total mangonel-line < 3)
 => (train mangonel-line))
@@ -1409,7 +1482,8 @@
 (defrule (goal gl-debug on)(current-age == feudal-age)  => (up-get-fact game-time 0 gl-tmp)(up-chat-data-to-self "[MASTER] >>> FEUDAL AGE at %d s" g: gl-tmp)  (disable-self))
 (defrule (goal gl-debug on)(current-age == castle-age)  => (up-get-fact game-time 0 gl-tmp)(up-chat-data-to-self "[MASTER] >>> CASTLE AGE at %d s" g: gl-tmp)  (disable-self))
 (defrule (goal gl-debug on)(current-age == imperial-age)=> (up-get-fact game-time 0 gl-tmp)(up-chat-data-to-self "[MASTER] >>> IMPERIAL AGE at %d s" g: gl-tmp)(disable-self))
-(defrule (goal gl-debug on)(goal gl-enemy-cavalry on)   => (chat-to-player my-player-number "[MASTER] counter: enemy knights -> pikes + monks") (disable-self))
+(defrule (goal gl-debug on)(goal gl-enemy-cavalry on)   => (chat-to-player my-player-number "[MASTER] counter: enemy knights/elephants -> halbs + monks convert") (disable-self))
+(defrule (goal gl-debug on)(goal gl-enemy-infantry on)  => (chat-to-player my-player-number "[MASTER] counter: enemy infantry mass -> Axemen + scorpions") (disable-self))
 (defrule (goal gl-debug on)(goal gl-enemy-anti-cav on)  => (chat-to-player my-player-number "[MASTER] counter: enemy spears/camels -> Throwing Axemen") (disable-self))
 (defrule (goal gl-debug on)(goal gl-enemy-ranged on)    => (chat-to-player my-player-number "[MASTER] counter: enemy archers -> skirms + Fletching") (disable-self))
 (defrule
