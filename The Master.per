@@ -1,5 +1,9 @@
 ;==================================================================================
-; THE MASTER - v2.10.0
+; THE MASTER - v2.10.1
+; v2.10.1 — boar #2 swarm raised 7 -> 12 (user): a close boar can arrive while the
+;  old crew still finishes carcass #1, leaving lurer #7 alone against it. 12 =
+;  6 carcass finishers + a fresh 6-crew. Boar #1 swarm back to the classic 6.
+;
 ; v2.10.0 — THE ELEVEN-POINT REVIEW (post-loss, corpus restudied: Promisory+all):
 ;  (1) BOAR #2: hunter SN raised to 7 before the next lure — a fresh lurer exists
 ;      while the old crew still eats carcass #1 (it used to wait for the carcass).
@@ -139,7 +143,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.10.0 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.10.1 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -605,17 +609,36 @@
 	(enable-timer timer-boar 90)
 	(chat-to-player my-player-number "[MASTER] Luring next boar (crew raised to 7)")
 )
+; Swarm, boar #1: nobody else is eating — the classic 6-hunter kill.
 (defrule
 	(goal gl-boar-state 1)
+	(goal gl-boars-done 0)
 	(dropsite-min-distance live-boar > -1)
 	(dropsite-min-distance live-boar <= 13)
 =>
 	(disable-timer timer-boar)
-	(set-strategic-number sn-minimum-number-hunters 7)
-	(set-strategic-number sn-minimum-boar-hunt-group-size 7)
+	(set-strategic-number sn-minimum-number-hunters 6)
+	(set-strategic-number sn-minimum-boar-hunt-group-size 6)
 	(set-goal gl-boar-state 2)
 	(enable-timer timer-boar 60)
-	(chat-to-player my-player-number "[MASTER] Boar at the TC -> hunters swarm")
+	(chat-to-player my-player-number "[MASTER] Boar at the TC -> 6 hunters")
+)
+; Swarm, boar #2+ (user, v2.10.1): the old crew of 6 may STILL be finishing
+; carcass #1 when this boar arrives — at 7 total, lurer #7 would face the live
+; boar ALONE and die. 12 = 6 carcass finishers + a full fresh 6-crew on the kill;
+; the exit rule releases everyone once the carcass is nearly done.
+(defrule
+	(goal gl-boar-state 1)
+	(up-compare-goal gl-boars-done >= 1)
+	(dropsite-min-distance live-boar > -1)
+	(dropsite-min-distance live-boar <= 13)
+=>
+	(disable-timer timer-boar)
+	(set-strategic-number sn-minimum-number-hunters 12)
+	(set-strategic-number sn-minimum-boar-hunt-group-size 12)
+	(set-goal gl-boar-state 2)
+	(enable-timer timer-boar 60)
+	(chat-to-player my-player-number "[MASTER] Boar 2 at the TC -> crew 12 (6+6)")
 )
 (defrule
 	(goal gl-boar-state 2)
