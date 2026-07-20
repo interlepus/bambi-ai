@@ -1,9 +1,11 @@
 ;==================================================================================
-; THE MASTER - v2.9.16
-; v2.9.16 — OPENING: both starting houses ordered in the SAME pass (2+1 builders).
-;  DE places one house right next to the villager trio instead of diagonally across
-;  the TC -> house #1 completes before villager 4 pops; sheep walk to the TC
-;  meanwhile. Sequential 2nd-house rule kept as a fallback if a placement fails.
+; THE MASTER - v2.9.17
+; v2.9.17 — OPENING FIXED WITH BAMBI'S REAL IDIOM (v2.9.16's same-pass double order
+;  was swallowed — the engine has ONE placement slot per building type). Bambi:
+;  3 builders + up-set-placement-data(own villagers) + up-build place-control =
+;  house #1 dropped NEXT TO the trio, done ~0:14; house #2 via the freed slot a
+;  second later. Classic plain-build fallback if the anchored placement fails.
+;  NOTE TO SELF: never issue two (build X) of the same type in one pass.
 ;
 ; v2.9.15 — two user catches on v2.9.14:
 ;  * STONE MATHS: we START with 200 stone = exactly the two boom TCs. Mine at the
@@ -109,7 +111,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.16 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.17 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -857,22 +859,35 @@
 ;endregion
 
 ;region BUILDINGS: HOUSES & LUMBER CAMPS ==========================================
-; OPENING: order BOTH starting houses in the SAME pass (user, v2.9.16 — standard
-; human opening): (1) the sheep are still walking to the TC, so all 3 starting
-; villagers have dead time to spend on houses; (2) a vil sent to sheep early kills
-; one mid-walk and wastes time; (3) with TWO simultaneous orders DE places one house
-; right NEXT to the villager trio (a single order often lands diagonally across the
-; TC) so house #1 completes before villager 4 pops; (4) the found livestock is then
-; waiting under the TC. Builder split is 2+1: the per-type assignment of 2 fills
-; house #1 first, the restore rule below drops future assignment to 1 for house #2.
+; OPENING — Bambi's exact first-house idiom (v2.9.17, read from Bambi V33.1):
+; a same-pass double order is IMPOSSIBLE (one placement slot per building type —
+; v2.9.16's second (build house) was swallowed, as observed). What actually gives
+; the zero-walk opening is ANCHORED PLACEMENT: up-set-placement-data points the
+; placer at OUR OWN VILLAGERS and up-build place-control drops the house right
+; next to the trio (a plain (build house) often lands diagonally across the TC).
+; All 3 builders go on house #1 (done ~0:14, before villager 4 pops) while the
+; sheep walk themselves to the TC; house #2 follows seconds later via the freed
+; placement slot, built by 1 villager after the restore rule below.
 (defrule
 	(building-type-count town-center > 0)
 	(building-type-count-total house == 0)
 	(can-build house)
 	(up-pending-objects c: house == 0)
-=> (up-assign-builders c: house c: 2)(build house)(build house))
+=>
+	(up-assign-builders c: house c: 3)
+	(up-set-placement-data my-player-number villager-class c: 0)
+	(up-build place-control 0 c: house)
+	(disable-self)
+)
+; Classic fallback (Bambi): if the anchored placement found no spot, plain build.
+(defrule
+	(building-type-count town-center > 0)
+	(building-type-count-total house == 0)
+	(can-build house)
+	(up-pending-objects c: house == 0)
+=> (up-assign-builders c: house c: 3)(build house))
 (defrule (building-type-count-total house > 0) => (up-assign-builders c: house c: 1)(disable-self))
-; Fallback: if one of the two opening placements failed, re-order the 2nd house.
+; 2nd house as soon as the per-type placement slot frees (next pass after house #1).
 (defrule
 	(current-age == dark-age)
 	(building-type-count-total house == 1)
