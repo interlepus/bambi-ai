@@ -1,5 +1,16 @@
 ;==================================================================================
-; THE MASTER - v2.10.1
+; THE MASTER - v2.11.0
+; v2.11.0 — ECO BALANCER GENERATION 2 (five-AI study: Promisory, Rehoboam,
+;  Barbarian, HordeDE, GamesGod). Finding: our per-pass nudges could never
+;  ACCUMULATE — the phase rules re-set the base every pass, capping any response
+;  at one step (the real reason 3000g/0f happened). Rehoboam/Promisory fix it
+;  with giant hand-tuned state machines; Barbarian/GamesGod keep the allocation
+;  in GOALS and mirror it into the SNs — persistent and closed-loop. Adopted the
+;  goal-bias architecture: gl-bias-food/wood/gold accumulate +/-4 per 20s tick
+;  while a stockpile skew persists (clamp +/-18), decay 1/tick toward 0 when
+;  balanced, and a mirror re-applies base+bias every pass (Castle+). Biases
+;  visible in telemetry. Promisory's plan-relative surplus goals noted for later.
+;
 ; v2.10.1 — boar #2 swarm raised 7 -> 12 (user): a close boar can arrive while the
 ;  old crew still finishes carcass #1, leaving lurer #7 alone against it. 12 =
 ;  6 carcass finishers + a fresh 6-crew. Boar #1 swarm back to the classic 6.
@@ -143,7 +154,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.10.1 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.11.0 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -209,6 +220,10 @@
 (defconst stance-aggressive 0)     ; up-set-attack-stance: actively engage/convert
 (defconst gl-enemy-infantry 30)    ; on = enemy masses militia-line/eagles
 (defconst gl-boars-done 31)        ; boars already eaten (2nd lure needs a bigger crew)
+(defconst gl-bias-food 32)         ; persistent eco-balancer offsets on the phase bases
+(defconst gl-bias-wood 33)         ;   (Barbarian/GamesGod architecture: allocation
+(defconst gl-bias-gold 34)         ;    lives in GOALS, SNs are recomputed mirrors)
+(defconst timer-eco 7)             ; eco-balancer controller tick (20s)
 (defconst enemy 3)                 ; player stance group for up-find-player
 (defconst find-closest 2)          ; up-find-player mode
 (defconst gl-search-remote-count 22) ; 3rd of the 4 consecutive search-state goals
@@ -868,24 +883,61 @@
 ;endregion
 
 ;region FLEXIBLE ECO (rebalance whichever way it's unbalanced) =====================
-(defrule (wood-amount > 800)(strategic-number sn-wood-gatherer-percentage > 22)
+; Feudal-only wood-float nudge (Castle+ skews are the bias controller's job below —
+; running both would double-correct).
+(defrule (current-age == feudal-age)(wood-amount > 800)(strategic-number sn-wood-gatherer-percentage > 22)
 => (up-modify-sn sn-wood-gatherer-percentage c:- 12)(up-modify-sn sn-food-gatherer-percentage c:+ 8)(up-modify-sn sn-gold-gatherer-percentage c:+ 4))
-; Wood SHORTAGE (Castle+) -> pull off gold onto wood.
-(defrule (current-age >= castle-age)(wood-amount < 150)(strategic-number sn-gold-gatherer-percentage > 10)
-=> (up-modify-sn sn-wood-gatherer-percentage c:+ 8)(up-modify-sn sn-gold-gatherer-percentage c:- 8))
-(defrule (gold-amount > 900)(strategic-number sn-gold-gatherer-percentage > 6)
-=> (up-modify-sn sn-gold-gatherer-percentage c:- 6)(up-modify-sn sn-food-gatherer-percentage c:+ 4)(up-modify-sn sn-wood-gatherer-percentage c:+ 2))
-(defrule (current-age >= castle-age)(food-amount > 1300)(strategic-number sn-food-gatherer-percentage > 25)
-=> (up-modify-sn sn-food-gatherer-percentage c:- 10)(up-modify-sn sn-gold-gatherer-percentage c:+ 10))
-; DYNAMIC BALANCER (user, v2.10.0 — "500w/0f/3000g must never happen"): the phase
-; rules set the base %, these shift it EVERY pass while a skew persists, floors
-; guarded. Big skew -> big shift; the market (below) is the last resort.
-(defrule (gold-amount > 1000)(food-amount < 200)(strategic-number sn-gold-gatherer-percentage > 12)
-=> (up-modify-sn sn-gold-gatherer-percentage c:- 10)(up-modify-sn sn-food-gatherer-percentage c:+ 10))
-(defrule (gold-amount > 2500)(strategic-number sn-gold-gatherer-percentage > 8)
-=> (up-modify-sn sn-gold-gatherer-percentage c:- 8)(up-modify-sn sn-food-gatherer-percentage c:+ 5)(up-modify-sn sn-wood-gatherer-percentage c:+ 3))
-(defrule (food-amount < 100)(wood-amount > 700)(strategic-number sn-wood-gatherer-percentage > 15)
-=> (up-modify-sn sn-wood-gatherer-percentage c:- 8)(up-modify-sn sn-food-gatherer-percentage c:+ 8))
+; DYNAMIC BALANCER v2 (v2.11.0 — studied Promisory/Rehoboam/Barbarian/HordeDE/
+; GamesGod). The v2.10.0 per-pass nudges could NEVER accumulate: the phase rules
+; re-set the base every pass, capping the response at one step — that is why 3000
+; gold still happened. Barbarian/GamesGod instead keep the allocation in GOALS and
+; mirror it into the SNs — persistent, accumulating, decaying. Adopted:
+;   * gl-bias-food/wood/gold = long-lived offsets on the phase bases (Castle+).
+;   * A 20s controller tick moves a bias 4 points per tick while a skew persists
+;     (clamped at +/-18) and every bias decays 1 toward 0 each tick, so the eco
+;     returns to the phase plan when stockpiles normalize.
+;   * The MIRROR below re-applies base+bias every pass, after the phase rules.
+; Controller tick (readers above the re-arm, TSA-timer pattern):
+(defrule (timer-triggered timer-eco)(up-compare-goal gl-bias-food > 0) => (up-modify-goal gl-bias-food c:- 1))
+(defrule (timer-triggered timer-eco)(up-compare-goal gl-bias-food < 0) => (up-modify-goal gl-bias-food c:+ 1))
+(defrule (timer-triggered timer-eco)(up-compare-goal gl-bias-wood > 0) => (up-modify-goal gl-bias-wood c:- 1))
+(defrule (timer-triggered timer-eco)(up-compare-goal gl-bias-wood < 0) => (up-modify-goal gl-bias-wood c:+ 1))
+(defrule (timer-triggered timer-eco)(up-compare-goal gl-bias-gold > 0) => (up-modify-goal gl-bias-gold c:- 1))
+(defrule (timer-triggered timer-eco)(up-compare-goal gl-bias-gold < 0) => (up-modify-goal gl-bias-gold c:+ 1))
+(defrule (timer-triggered timer-eco)(current-age >= castle-age)
+	(gold-amount > 1000)(food-amount < 300)
+	(up-compare-goal gl-bias-gold > -18)
+=> (up-modify-goal gl-bias-gold c:- 4)(up-modify-goal gl-bias-food c:+ 4))
+(defrule (timer-triggered timer-eco)(current-age >= castle-age)
+	(gold-amount > 2000)
+	(up-compare-goal gl-bias-gold > -18)
+=> (up-modify-goal gl-bias-gold c:- 3)(up-modify-goal gl-bias-food c:+ 2)(up-modify-goal gl-bias-wood c:+ 1))
+(defrule (timer-triggered timer-eco)(current-age >= castle-age)
+	(food-amount > 1500)(gold-amount < 500)
+	(up-compare-goal gl-bias-food > -18)
+=> (up-modify-goal gl-bias-food c:- 4)(up-modify-goal gl-bias-gold c:+ 4))
+(defrule (timer-triggered timer-eco)(current-age >= castle-age)
+	(wood-amount > 1200)
+	(up-compare-goal gl-bias-wood > -18)
+=> (up-modify-goal gl-bias-wood c:- 3)(up-modify-goal gl-bias-food c:+ 2)(up-modify-goal gl-bias-gold c:+ 1))
+(defrule (timer-triggered timer-eco)(current-age >= castle-age)
+	(wood-amount < 150)(food-amount > 400)
+	(up-compare-goal gl-bias-wood < 18)
+=> (up-modify-goal gl-bias-wood c:+ 4)(up-modify-goal gl-bias-food c:- 4))
+(defrule (timer-triggered timer-eco)(current-age >= castle-age)
+	(food-amount < 150)(wood-amount > 500)
+	(up-compare-goal gl-bias-food < 18)
+=> (up-modify-goal gl-bias-food c:+ 4)(up-modify-goal gl-bias-wood c:- 4))
+(defrule (true) => (enable-timer timer-eco 20)(disable-self))
+(defrule (timer-triggered timer-eco) => (disable-timer timer-eco)(enable-timer timer-eco 20))
+; MIRROR: every pass, after the phase rules re-set the bases above, apply the
+; accumulated biases (worst case: castle base gold 23 - 18 = 5, never negative).
+(defrule (current-age >= castle-age)
+=>
+	(up-modify-sn sn-food-gatherer-percentage g:+ gl-bias-food)
+	(up-modify-sn sn-wood-gatherer-percentage g:+ gl-bias-wood)
+	(up-modify-sn sn-gold-gatherer-percentage g:+ gl-bias-gold)
+)
 ; Stone PILE -> stop over-mining stone, put it on wood. (v2.10.0: threshold raised
 ; 600 -> 900 — it was throttling stone just BELOW the 650 a second castle costs,
 ; which is why castle #2 never came despite "enough stone".)
@@ -1695,6 +1747,9 @@
 	(up-chat-data-to-self "[MASTER] town-size=%d" s: sn-maximum-town-size)
 	(up-chat-data-to-self "[MASTER] scan-target=%d" g: gl-target-player)
 	(up-chat-data-to-self "[MASTER] home-threat=%d" g: gl-home-threat)
+	(up-chat-data-to-self "[MASTER] bias food=%d" g: gl-bias-food)
+	(up-chat-data-to-self "[MASTER] bias wood=%d" g: gl-bias-wood)
+	(up-chat-data-to-self "[MASTER] bias gold=%d" g: gl-bias-gold)
 	(disable-timer timer-debug)(enable-timer timer-debug 60)
 )
 ;endregion
