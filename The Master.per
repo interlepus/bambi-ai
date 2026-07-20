@@ -1,5 +1,22 @@
 ;==================================================================================
-; THE MASTER - v2.11.0
+; THE MASTER - v2.12.0
+; v2.12.0 — six-point review (home-threat CONFIRMED WORKING in game — gen 3 stays):
+;  (1) CIVILIAN DEFENSE (Bambi): after Loom -> offense 2 / defense 3 / militia 10,
+;      villagers now fight in-town threats (the ignored tower!); stood down while
+;      an enemy army >9 is out, reactivated when calm.
+;  (2) BOAR v3: organic gatherers on a carcass satisfied "minimum 7 hunters" so
+;      boar #2 never got a lurer. Now up-request-hunters (GamesGod/rAge) asks for
+;      lure crew DIRECTLY: 1 to lure, 6 on arrival, 0 on exit — works for any
+;      number of boars on any map.
+;  (3) STONE CAMP STARVED: gold+stone share one building TYPE and rules waited for
+;      pending<1 — the gold side kept the slot during the attack. pending<2 now,
+;      and the stone camp may come in FEUDAL once a tower exists.
+;  (4) Tower stone-refill: age gate removed — refill starts the moment the tower
+;      stands (stone < 200), enabling tower #2 without waiting for the click.
+;  (6) FEUDAL FLOAT GUARDS: click blocked on gold while 1200 food piled -> hard
+;      override 30/40/30 when food>700 & gold<250; Bambi's feudal stone keeper
+;      (+5% while under 200) adopted.
+;
 ; v2.11.0 — ECO BALANCER GENERATION 2 (five-AI study: Promisory, Rehoboam,
 ;  Barbarian, HordeDE, GamesGod). Finding: our per-pass nudges could never
 ;  ACCUMULATE — the phase rules re-set the base every pass, capping any response
@@ -154,7 +171,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.11.0 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.12.0 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -442,6 +459,34 @@
 )
 ;endregion
 
+;region CIVILIAN DEFENSE (Bambi: villagers fight what enters town) ================
+; v2.12.0 (user): the vills IGNORED an enemy tower going up in town. Bambi's cure:
+; once Loom is done, sn-allow-civilian-offense 2 / defense 3 / militia 10 — the
+; villagers themselves attack in-town threats (towers included). Stood down
+; Bambi-style while a REAL enemy army (>9) is out: they would just die to it.
+(defrule
+	(research-completed ri-loom)
+	(current-age < castle-age)
+	(not (players-military-population any-enemy > 9))
+	(military-population < 10)
+	(strategic-number sn-allow-civilian-offense == 0)
+=>
+	(set-strategic-number sn-allow-civilian-offense 2)
+	(set-strategic-number sn-allow-civilian-defense 3)
+	(set-strategic-number sn-number-civilian-militia 10)
+	(chat-to-player my-player-number "[MASTER] civilians: defense+offense ON")
+)
+(defrule
+	(current-age < castle-age)
+	(players-military-population any-enemy > 9)
+	(strategic-number sn-allow-civilian-offense == 2)
+=>
+	(set-strategic-number sn-allow-civilian-offense 0)
+	(set-strategic-number sn-allow-civilian-defense 1)
+	(chat-to-player my-player-number "[MASTER] civilians: stand down (enemy army out)")
+)
+;endregion
+
 ;region AGE-UP (ABOVE villager production -> rule-order gives it the TC first) ======
 (defrule
 	(or (civilian-population >= 21) (players-current-age any-enemy >= feudal-age))
@@ -589,80 +634,47 @@
 ;endregion
 
 ;region BOAR LURE (1 lurer -> boar walks to TC -> 6 hunters) =======================
-; BOAR #1: plain lure — nobody is eating anything yet, 1 hunter = the lurer.
+; BOAR v3 (v2.12.0 — the SN-minimum approach failed the moment ORGANIC gatherers
+; crowded a carcass: 10 villagers eating boar #1 satisfied "minimum 7 hunters", so
+; the engine never freed anyone to lure boar #2. GamesGod/rAge use the dedicated
+; command instead: up-request-hunters asks for hunters FOR THE ACTIVE LURE
+; specifically, independent of who happens to be eating. One state machine now
+; serves EVERY boar (2, 3, 5 — any map): request 1 to lure, 6 on arrival, 0 on
+; exit, then the cycle re-arms for the next live boar automatically.
 (defrule
 	(current-age == dark-age)
 	(civilian-population >= 14)
 	(goal gl-boar-state 0)
-	(goal gl-boars-done 0)
 	(dropsite-min-distance live-boar > -1)
 	(dropsite-min-distance live-boar s:<= sn-maximum-hunt-drop-distance)
 =>
 	(set-strategic-number sn-enable-boar-hunting 2)
-	(set-strategic-number sn-minimum-number-hunters 1)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1)
+	(up-request-hunters c: 1)
 	(set-goal gl-boar-state 1)
 	(enable-timer timer-boar 90)
-	(chat-to-player my-player-number "[MASTER] Luring boar with 1 villager")
+	(chat-to-player my-player-number "[MASTER] Luring boar (requested 1 lurer)")
 )
-; BOAR #2+ (user, v2.10.0): the previous crew is still on the carcass when the next
-; lure should start — with the hunter SN at 1 no villager is ever FREE to lure, so
-; boar #2 waited until the carcass was gone. Raise the allocation to 7 (6 eaters +
-; 1 fresh lurer) BEFORE luring; the swarm step then covers the lure crew too.
-(defrule
-	(current-age == dark-age)
-	(goal gl-boar-state 0)
-	(up-compare-goal gl-boars-done >= 1)
-	(dropsite-min-distance live-boar > -1)
-	(dropsite-min-distance live-boar s:<= sn-maximum-hunt-drop-distance)
-=>
-	(set-strategic-number sn-enable-boar-hunting 2)
-	(set-strategic-number sn-minimum-number-hunters 7)
-	(set-strategic-number sn-minimum-boar-hunt-group-size 7)
-	(set-strategic-number sn-minimum-boar-lure-group-size 1)
-	(set-goal gl-boar-state 1)
-	(enable-timer timer-boar 90)
-	(chat-to-player my-player-number "[MASTER] Luring next boar (crew raised to 7)")
-)
-; Swarm, boar #1: nobody else is eating — the classic 6-hunter kill.
 (defrule
 	(goal gl-boar-state 1)
-	(goal gl-boars-done 0)
 	(dropsite-min-distance live-boar > -1)
 	(dropsite-min-distance live-boar <= 13)
 =>
 	(disable-timer timer-boar)
-	(set-strategic-number sn-minimum-number-hunters 6)
 	(set-strategic-number sn-minimum-boar-hunt-group-size 6)
+	(up-request-hunters c: 6)
 	(set-goal gl-boar-state 2)
 	(enable-timer timer-boar 60)
-	(chat-to-player my-player-number "[MASTER] Boar at the TC -> 6 hunters")
-)
-; Swarm, boar #2+ (user, v2.10.1): the old crew of 6 may STILL be finishing
-; carcass #1 when this boar arrives — at 7 total, lurer #7 would face the live
-; boar ALONE and die. 12 = 6 carcass finishers + a full fresh 6-crew on the kill;
-; the exit rule releases everyone once the carcass is nearly done.
-(defrule
-	(goal gl-boar-state 1)
-	(up-compare-goal gl-boars-done >= 1)
-	(dropsite-min-distance live-boar > -1)
-	(dropsite-min-distance live-boar <= 13)
-=>
-	(disable-timer timer-boar)
-	(set-strategic-number sn-minimum-number-hunters 12)
-	(set-strategic-number sn-minimum-boar-hunt-group-size 12)
-	(set-goal gl-boar-state 2)
-	(enable-timer timer-boar 60)
-	(chat-to-player my-player-number "[MASTER] Boar 2 at the TC -> crew 12 (6+6)")
+	(chat-to-player my-player-number "[MASTER] Boar at the TC -> requested 6 hunters")
 )
 (defrule
 	(goal gl-boar-state 2)
 	(or (up-remaining-boar-amount < 180) (dropsite-min-distance live-boar == -1))
 =>
 	(set-strategic-number sn-enable-boar-hunting 1)
-	(set-strategic-number sn-minimum-number-hunters 0)
 	(set-strategic-number sn-minimum-boar-hunt-group-size 0)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1000)
+	(up-request-hunters c: 0)
 	(set-goal gl-boar-state 0)
 	(up-modify-goal gl-boars-done c:+ 1)
 	(disable-timer timer-boar)
@@ -675,8 +687,8 @@
 	(timer-triggered timer-boar)
 =>
 	(set-strategic-number sn-enable-boar-hunting 1)
-	(set-strategic-number sn-minimum-number-hunters 0)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1000)
+	(up-request-hunters c: 0)
 	(set-goal gl-boar-state 0)
 	(disable-timer timer-boar)
 	(chat-to-player my-player-number "[MASTER] Boar lure timed out -> reset")
@@ -686,9 +698,9 @@
 	(timer-triggered timer-boar)
 =>
 	(set-strategic-number sn-enable-boar-hunting 1)
-	(set-strategic-number sn-minimum-number-hunters 0)
 	(set-strategic-number sn-minimum-boar-hunt-group-size 0)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1000)
+	(up-request-hunters c: 0)
 	(set-goal gl-boar-state 0)
 	(disable-timer timer-boar)
 )
@@ -827,6 +839,32 @@
 	(set-strategic-number sn-gold-gatherer-percentage 6)
 	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
+; FEUDAL FLOAT GUARDS (v2.12.0, user: 1200 food & no gold — the Castle click was
+; BLOCKED ON GOLD while food piled). These sit BELOW the feudal phase rules, so
+; they positionally override them whenever they apply.
+(defrule
+	(current-age == feudal-age)
+	(not (up-research-status c: castle-age c:>= research-pending))
+	(food-amount > 700)
+	(gold-amount < 250)
+=>
+	(set-strategic-number sn-food-gatherer-percentage 30)
+	(set-strategic-number sn-wood-gatherer-percentage 40)
+	(set-strategic-number sn-gold-gatherer-percentage 30)
+)
+; Bambi's feudal stone keeper: if the 200 start-stone was spent (towers!), top it
+; back up BEFORE the click — +5% from wood while under 200. (The phase rules re-set
+; stone to 0 each pass, so this one-step override is exactly +5 while it applies.)
+(defrule
+	(current-age == feudal-age)
+	(not (up-research-status c: castle-age c:>= research-pending))
+	(stone-amount < 200)
+	(strategic-number sn-stone-gatherer-percentage == 0)
+=>
+	(up-modify-sn sn-stone-gatherer-percentage c:+ 5)
+	(up-modify-sn sn-wood-gatherer-percentage c:- 5)
+)
+
 ; CLICKING CASTLE (either plan). Stone maths (user, v2.9.15): we START with 200
 ; stone = exactly TC#2 + TC#3 (100 each) — mine stone at the click ONLY if the bank
 ; was raided (towers) or the eco is big enough to afford insurance (>30 vills).
@@ -949,7 +987,9 @@
 (defrule (current-age >= castle-age)(building-type-count-total town-center < 3)(stone-amount < 200)
 	(strategic-number sn-stone-gatherer-percentage < 10)
 => (up-modify-sn sn-stone-gatherer-percentage c:+ 5)(up-modify-sn sn-food-gatherer-percentage c:- 5))
-(defrule (current-age >= castle-age)(building-type-count-total watch-tower > 0)(stone-amount < 200)
+; (v2.12.0: age gate REMOVED — the moment a defensive tower stands, its 125 stone
+;  must start coming back, not at the Castle click. User point 4.)
+(defrule (building-type-count-total watch-tower > 0)(stone-amount < 200)
 	(strategic-number sn-stone-gatherer-percentage < 12)
 => (up-modify-sn sn-stone-gatherer-percentage c:+ 4)(up-modify-sn sn-food-gatherer-percentage c:- 4))
 
@@ -1083,21 +1123,27 @@
 
 ; Gold camp only AFTER stable+blacksmith exist: scouts cost no gold — gold is for
 ; blacksmith techs and the Castle click, well into Feudal (barracks first!).
+; v2.12.0 (user: "the stone mine didn't get built"): gold and stone share the ONE
+; mining-camp TYPE, and every rule waited for pending < 1 — during an attack the
+; gold side kept claiming the single slot and the stone camp starved. Two camps may
+; now be pending at once, and the stone camp is also allowed in FEUDAL as soon as
+; a tower exists (its 125s must be re-minable immediately — user point 4).
 (defrule
 	(current-age >= feudal-age)
 	(building-type-count-total stable > 0)
 	(dropsite-min-distance gold > 5)
 	(resource-found gold)
-	(up-pending-objects c: mining-camp < 1)
+	(up-pending-objects c: mining-camp < 2)
 	(can-build mining-camp)
 => (build mining-camp))
-
-; Stone mining camp from the CASTLE CLICK on (stone ready when we arrive).
 (defrule
-	(or (current-age >= castle-age) (up-research-status c: castle-age c:>= research-pending))
+	(or
+		(or (current-age >= castle-age) (up-research-status c: castle-age c:>= research-pending))
+		(building-type-count-total watch-tower > 0)
+	)
 	(dropsite-min-distance stone > 5)
 	(resource-found stone)
-	(up-pending-objects c: mining-camp < 1)
+	(up-pending-objects c: mining-camp < 2)
 	(can-build mining-camp)
 => (build mining-camp))
 
