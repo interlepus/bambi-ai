@@ -1,8 +1,16 @@
 ;==================================================================================
-; THE MASTER - v2.9.12
+; THE MASTER - v2.9.13
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
+;
+; v2.9.13 — HOME-THREAT PERMANENTLY 0 SOLVED: the scan's core find used
+;  (up-find-remote c: all-units-class c: 40) — but the -1 wildcard is documented
+;  ONLY for up-point-contains; up-find-remote finds NOTHING with it, so only enemy
+;  BUILDINGS near home were ever counted (= 0 in a normal game). Raiders burned the
+;  mill on screen while home-threat read 0. Every raid class is now found
+;  explicitly (incl. towers, class 52, which building-class 3 does NOT cover),
+;  split over two same-pass stages. Telemetry now also prints scan-target.
 ;
 ; v2.9.12 — HOUSING FREEZE AFTER ATTACKS SOLVED: v2.7's guards reset every pending
 ;  placement every pass — but under load (farm-ringed core + combat) a house search
@@ -62,6 +70,8 @@
 ;   first (they eat Paladins). Camels hard-counter us -> pikes/axemen answer.
 ;
 ; NOTE TO SELF: AoE2 and/or/nand are BINARY (exactly 2 args) — nest, never list 3+.
+; NOTE TO SELF: -1 "any unit" works ONLY in up-point-contains/up-get-point-contains.
+;  DUC finds (up-find-remote/-local) need a real type or 900-series class id.
 ; NOTE TO SELF: up-enemy-units/villagers-in-town count TARGETABLE units, gaia included
 ;  (boar/wolf!). Only up-enemy-buildings-in-town is gaia-proof — Bambi uses ONLY that.
 ; >>> DEBUG: flip gl-debug to "off" at the rule marked [DEBUG TOGGLE] to silence.
@@ -69,7 +79,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.12 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.13 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -104,7 +114,23 @@
 
 (defconst priority-offense 0)      ; for up-reset-target-priorities
 (defconst ri-bearded-axe 83)       ; Franks Castle UT (+1 Throwing Axeman range) — id per Sol/refs
-(defconst all-units-class -1)      ; any-unit class for DUC searches
+; Genie unit classes for DUC finds (900 + genie class id). v2.9.13: the -1 "any
+; unit" wildcard is documented ONLY for up-point-contains / up-get-point-contains —
+; up-find-remote finds NOTHING with it, which kept home-threat at 0 forever.
+; Enumerate the classes that actually show up in a raid instead.
+(defconst mclass-archer 900)       ; archers AND skirmishers
+(defconst mclass-villager 904)     ; forward-building villagers
+(defconst mclass-infantry 906)     ; militia line, eagles
+(defconst mclass-cavalry 912)      ; knights, camels, steppe lancers
+(defconst mclass-siege 913)        ; rams, mangonels, scorpions
+(defconst mclass-monk 918)
+(defconst mclass-petard 935)
+(defconst mclass-cav-archer 936)
+(defconst mclass-hand-cannon 944)
+(defconst mclass-pike 946)         ; pikemen/halberdiers (own genie class)
+(defconst mclass-scout 947)        ; scout-cavalry line
+(defconst mclass-spear 950)        ; spearmen (own genie class)
+(defconst mclass-tower 952)        ; towers are class 52 — NOT building-class 3
 (defconst enemy 3)                 ; player stance group for up-find-player
 (defconst find-closest 2)          ; up-find-player mode
 (defconst gl-search-remote-count 22) ; 3rd of the 4 consecutive search-state goals
@@ -193,17 +219,40 @@
 	(up-modify-sn sn-target-player-number g:= gl-target-player)
 )
 ; Scan: count enemy units AND buildings (a forward tower is a threat!) near home.
+; v2.9.13: was one rule using (up-find-remote c: all-units-class c: 40) — the -1
+; wildcard is only valid for point-contains, so the find returned NOTHING and only
+; enemy BUILDINGS near home were counted: home-threat stayed 0 with raiders burning
+; the mill on screen. Now every raid-relevant class is found explicitly, split over
+; two same-pass stages (tick 1 -> 2) to stay well under the per-rule action limit.
+; The remote list accumulates across finds; one state read at the end totals it.
 (defrule
 	(goal gl-scan-tick 1)
 	(up-compare-goal gl-target-player > 0)
 =>
-	(set-goal gl-scan-tick 0)
+	(set-goal gl-scan-tick 2)
 	(up-modify-sn sn-focus-player-number g:= gl-target-player)
 	(up-full-reset-search)
 	(up-set-target-point gl-home-x)
 	(up-filter-distance c: -1 c: 36)
-	(up-find-remote c: all-units-class c: 40)
+	(up-find-remote c: mclass-scout c: 40)
+	(up-find-remote c: mclass-cavalry c: 40)
+	(up-find-remote c: mclass-archer c: 40)
+	(up-find-remote c: mclass-infantry c: 40)
+	(up-find-remote c: mclass-spear c: 40)
+	(up-find-remote c: mclass-pike c: 40)
+	(up-find-remote c: mclass-cav-archer c: 40)
+)
+(defrule
+	(goal gl-scan-tick 2)
+=>
+	(set-goal gl-scan-tick 0)
+	(up-find-remote c: mclass-hand-cannon c: 40)
+	(up-find-remote c: mclass-siege c: 40)
+	(up-find-remote c: mclass-petard c: 40)
+	(up-find-remote c: mclass-monk c: 40)
+	(up-find-remote c: mclass-villager c: 40)
 	(up-find-remote c: building-class c: 10)
+	(up-find-remote c: mclass-tower c: 10)
 	(up-get-search-state gl-search-base)
 	(up-modify-goal gl-home-threat c:= 0)
 	(up-modify-goal gl-home-threat g:+ gl-search-remote-count)
@@ -1368,6 +1417,7 @@
 =>
 	(up-chat-data-to-self "[MASTER] mil-pop=%d" g: gl-my-army)
 	(up-chat-data-to-self "[MASTER] town-size=%d" s: sn-maximum-town-size)
+	(up-chat-data-to-self "[MASTER] scan-target=%d" g: gl-target-player)
 	(up-chat-data-to-self "[MASTER] home-threat=%d" g: gl-home-threat)
 	(disable-timer timer-debug)(enable-timer timer-debug 60)
 )
