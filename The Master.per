@@ -1,5 +1,12 @@
 ;==================================================================================
-; THE MASTER - v2.9.17
+; THE MASTER - v2.9.18
+; v2.9.18 — BOAR-LOOM ROOT CAUSE: all six (not (up-attacker-class == gaia)) guards
+;  were NO-OPS. Bambi defines gaia = 910 (predator class); we had copied the
+;  expression without the defconst, so DE's predefined gaia (player 0) made the
+;  guard always-true — boar/wolf attacks passed as real attacks everywhere
+;  (Loom, Fletching, militia, threat rules). Fixed with (defconst gaia 910).
+;  Validator gained a copy-source defconst audit so this trap class is caught.
+;
 ; v2.9.17 — OPENING FIXED WITH BAMBI'S REAL IDIOM (v2.9.16's same-pass double order
 ;  was swallowed — the engine has ONE placement slot per building type). Bambi:
 ;  3 builders + up-set-placement-data(own villagers) + up-build place-control =
@@ -111,7 +118,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.17 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.18 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -163,6 +170,14 @@
 (defconst mclass-scout 947)        ; scout-cavalry line
 (defconst mclass-spear 950)        ; spearmen (own genie class)
 (defconst mclass-tower 952)        ; towers are class 52 — NOT building-class 3
+; THE GAIA TRAP (v2.9.18): up-attacker-class compares 900-series CLASS ids. Bambi's
+; guard (not (up-attacker-class == gaia)) works because BAMBI DEFINES gaia = 910
+; (predator-animal: boars, wolves). Without that defconst, DE's predefined gaia is
+; the PLAYER constant (0) — the guard compares a class to 0, is always true, and
+; boar attacks pass as real attacks (the boar-Loom of v2.9.17). One line heals all
+; six guards in this file. Lesson: copy a reference's DEFCONSTS with its expressions.
+(defconst gaia 910)
+(defconst place-control 2)         ; up-build placement mode (pinned to Bambi's value)
 (defconst mclass-war-elephant 924) ; battle/war elephants (own class — NOT cavalry 12!)
 (defconst mclass-elephant-archer 926)
 (defconst stance-defensive 1)      ; up-set-attack-stance: fight what comes close
