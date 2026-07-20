@@ -1,5 +1,26 @@
 ;==================================================================================
-; THE MASTER - v2.9.18
+; THE MASTER - v2.10.0
+; v2.10.0 — THE ELEVEN-POINT REVIEW (post-loss, corpus restudied: Promisory+all):
+;  (1) BOAR #2: hunter SN raised to 7 before the next lure — a fresh lurer exists
+;      while the old crew still eats carcass #1 (it used to wait for the carcass).
+;  (2) MONKS: aggressive stance while cavalry/elephant threat -> convert on sight
+;      (defensive only converted when attacked themselves).
+;  (3) DYNAMIC BALANCER: big-skew rules (gold>1000&food<200 -> shift 10; gold>2500;
+;      food<100&wood>700) on top of the phase bases. 500w/0f/3000g must not recur.
+;  (4) TCs already built with 3 assigned builders (verified).
+;  (5) TSA: Bambi-style ladder — +5 per attack tick while army >= 30 (to 100) /
+;      >= 50 (to 200), chats "TSA -> N". Old design froze at 82.
+;  (6) HOME-THREAT: DUC scan replaced by engine per-type in-town counters
+;      (up-unit-type-in-town per line): +2 per enemy type present, +2 mass bonus.
+;      Enemy-scoped by the engine, boar-proof by type.
+;  (7) MARKET: buys FOOD on gold-float famine; first-use ticker chats for every
+;      market lever so trades are visible in the recording.
+;  (8) BOOM: TC pending < 2 — TC#3 no longer waits for TC#2; monastery already
+;      parallel via -total.
+;  (9) FARMS: parallel per age — pending 1/2/3/4 in Dark/Feudal/Castle/Imperial.
+;  (11) CASTLES: stone-pile relief moved 600 -> 900 (it throttled stone just below
+;      the 650 a castle costs — why castle #2 never came); castles 3-4 at 800+.
+;
 ; v2.9.18 — BOAR-LOOM ROOT CAUSE: all six (not (up-attacker-class == gaia)) guards
 ;  were NO-OPS. Bambi defines gaia = 910 (predator class); we had copied the
 ;  expression without the defconst, so DE's predefined gaia (player 0) made the
@@ -118,7 +139,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.18 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.10.0 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -181,7 +202,9 @@
 (defconst mclass-war-elephant 924) ; battle/war elephants (own class — NOT cavalry 12!)
 (defconst mclass-elephant-archer 926)
 (defconst stance-defensive 1)      ; up-set-attack-stance: fight what comes close
+(defconst stance-aggressive 0)     ; up-set-attack-stance: actively engage/convert
 (defconst gl-enemy-infantry 30)    ; on = enemy masses militia-line/eagles
+(defconst gl-boars-done 31)        ; boars already eaten (2nd lure needs a bigger crew)
 (defconst enemy 3)                 ; player stance group for up-find-player
 (defconst find-closest 2)          ; up-find-player mode
 (defconst gl-search-remote-count 22) ; 3rd of the 4 consecutive search-state goals
@@ -213,6 +236,7 @@
 	(set-goal gl-overboom off)
 	(set-goal gl-towers-avoided off)
 	(set-goal gl-enemy-infantry off)
+	(set-goal gl-boars-done 0)
 	(disable-self)
 )
 (defrule (true) => (enable-timer timer-debug 20) (disable-self))
@@ -247,10 +271,9 @@
 )
 ;endregion
 
-;region FIXED-HOME THREAT SCAN (from Sol) =========================================
-; Count enemy units within 36 tiles of the ORIGINAL home point. This stays accurate
-; when the town radius has grown toward the enemy — fighting at THEIR base can no
-; longer masquerade as a raid on ours.
+;region HOME THREAT SCAN (engine in-town counters — v2.10.0) ======================
+; gl-home-threat = a score of enemy presence inside our town radius, rebuilt every
+; 4s from the engine's own per-type in-town counters (see the scan comment below).
 ; Tick: re-find the enemy player fresh each cycle, then flag the scan.
 (defrule
 	(timer-triggered timer-homescan)
@@ -270,56 +293,40 @@
 =>
 	(up-modify-sn sn-target-player-number g:= gl-target-player)
 )
-; Scan: count enemy units AND buildings (a forward tower is a threat!) near home.
-; v2.9.13: was one rule using (up-find-remote c: all-units-class c: 40) — the -1
-; wildcard is only valid for point-contains, so the find returned NOTHING and only
-; enemy BUILDINGS near home were counted: home-threat stayed 0 with raiders burning
-; the mill on screen. Now every raid-relevant class is found explicitly, split over
-; two same-pass stages (tick 1 -> 2) to stay well under the per-rule action limit.
-; The remote list accumulates across finds; one state read at the end totals it.
+; Scan v2.10.0 — THIRD generation. The DUC find scan (v2.9.13/14) still read 0 in
+; live raids, so it is replaced wholesale by the ENGINE's own per-type in-town
+; counters, the pattern the reference AIs trust: (up-unit-type-in-town c: <line>)
+; counts ENEMY units of that line inside the town radius — enemy-scoped by the
+; engine, and gaia-proof because a boar is never a knight-line. Scoring: +2 per
+; enemy type present, +2 extra when a core type is MASSED (>3) — so a lone scout
+; scores 2, a real raid 4-8+. Consumers calibrated: Loom >=1, TSA-pause/2nd-range
+; >=3, militia >=3, attack-pause >=4, boom-pause >=6.
 (defrule
 	(goal gl-scan-tick 1)
-	(up-compare-goal gl-target-player > 0)
 =>
 	(set-goal gl-scan-tick 2)
-	(up-modify-sn sn-focus-player-number g:= gl-target-player)
-	(up-full-reset-search)
-	(up-set-target-point gl-home-x)
-	(up-filter-distance c: -1 c: 36)
-	(up-find-remote c: mclass-scout c: 40)
-	(up-find-remote c: mclass-cavalry c: 40)
-	(up-find-remote c: mclass-archer c: 40)
-	(up-find-remote c: mclass-infantry c: 40)
-	(up-find-remote c: mclass-spear c: 40)
-	(up-find-remote c: mclass-pike c: 40)
-	(up-find-remote c: mclass-cav-archer c: 40)
-	(up-find-remote c: mclass-war-elephant c: 40)
-)
-(defrule
-	(goal gl-scan-tick 2)
-=>
-	(set-goal gl-scan-tick 0)
-	(up-find-remote c: mclass-elephant-archer c: 40)
-	(up-find-remote c: mclass-hand-cannon c: 40)
-	(up-find-remote c: mclass-siege c: 40)
-	(up-find-remote c: mclass-petard c: 40)
-	(up-find-remote c: mclass-monk c: 40)
-	(up-find-remote c: mclass-villager c: 40)
-	(up-find-remote c: building-class c: 10)
-	(up-find-remote c: mclass-tower c: 10)
-	(up-get-search-state gl-search-base)
 	(up-modify-goal gl-home-threat c:= 0)
-	(up-modify-goal gl-home-threat g:+ gl-search-remote-count)
-	(set-strategic-number sn-focus-player-number 0)
-	(up-full-reset-search)
 )
-; No enemy identified yet -> clear the tick and report 0 (accurate: nothing seen).
-(defrule
-	(goal gl-scan-tick 1)
-	(up-compare-goal gl-target-player <= 0)
-=>
-	(set-goal gl-scan-tick 0)
-)
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: scout-cavalry-line > 0)   => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: knight-line > 0)          => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: camel-line > 0)           => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: archer-line > 0)          => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: skirmisher-line > 0)      => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: cavalry-archer-line > 0)  => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: spearman-line > 0)        => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: militiaman-line > 0)      => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: battering-ram-line > 0)   => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: mangonel-line > 0)        => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: monk > 0)                 => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: battle-elephant-line > 0) => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: elephant-archer-line > 0) => (up-modify-goal gl-home-threat c:+ 2))
+; Mass bonus: a single-type DEATHBALL (8 knights) must scare us as much as a mix.
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: scout-cavalry-line > 3)   => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: knight-line > 3)          => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: archer-line > 3)          => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: skirmisher-line > 3)      => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2)(up-unit-type-in-town c: battering-ram-line > 1)   => (up-modify-goal gl-home-threat c:+ 2))
+(defrule (goal gl-scan-tick 2) => (set-goal gl-scan-tick 0))
 ; One-shot confirmation that the scan engine is alive.
 (defrule
 	(goal gl-debug on)
@@ -447,10 +454,12 @@
 	(current-age >= castle-age)
 	(building-type-count-total town-center < 3)
 	(can-build town-center)
-	(up-pending-objects c: town-center < 1)
+	(up-pending-objects c: town-center < 2)
 	(civilian-population > 24)
 	(up-compare-goal gl-home-threat < 6)
 => (up-assign-builders c: town-center c: 3)(build town-center))
+; (v2.10.0, user: pending < 2 — TC#3 must NOT wait for TC#2 to finish; -total
+;  counts under-construction, so the monastery below already starts in parallel.)
 
 ; Monastery AFTER all 3 TCs are placed (boom first!) -> monk -> relic gold trickle.
 (defrule
@@ -561,10 +570,12 @@
 ;endregion
 
 ;region BOAR LURE (1 lurer -> boar walks to TC -> 6 hunters) =======================
+; BOAR #1: plain lure — nobody is eating anything yet, 1 hunter = the lurer.
 (defrule
 	(current-age == dark-age)
 	(civilian-population >= 14)
 	(goal gl-boar-state 0)
+	(goal gl-boars-done 0)
 	(dropsite-min-distance live-boar > -1)
 	(dropsite-min-distance live-boar s:<= sn-maximum-hunt-drop-distance)
 =>
@@ -575,17 +586,36 @@
 	(enable-timer timer-boar 90)
 	(chat-to-player my-player-number "[MASTER] Luring boar with 1 villager")
 )
+; BOAR #2+ (user, v2.10.0): the previous crew is still on the carcass when the next
+; lure should start — with the hunter SN at 1 no villager is ever FREE to lure, so
+; boar #2 waited until the carcass was gone. Raise the allocation to 7 (6 eaters +
+; 1 fresh lurer) BEFORE luring; the swarm step then covers the lure crew too.
+(defrule
+	(current-age == dark-age)
+	(goal gl-boar-state 0)
+	(up-compare-goal gl-boars-done >= 1)
+	(dropsite-min-distance live-boar > -1)
+	(dropsite-min-distance live-boar s:<= sn-maximum-hunt-drop-distance)
+=>
+	(set-strategic-number sn-enable-boar-hunting 2)
+	(set-strategic-number sn-minimum-number-hunters 7)
+	(set-strategic-number sn-minimum-boar-hunt-group-size 7)
+	(set-strategic-number sn-minimum-boar-lure-group-size 1)
+	(set-goal gl-boar-state 1)
+	(enable-timer timer-boar 90)
+	(chat-to-player my-player-number "[MASTER] Luring next boar (crew raised to 7)")
+)
 (defrule
 	(goal gl-boar-state 1)
 	(dropsite-min-distance live-boar > -1)
 	(dropsite-min-distance live-boar <= 13)
 =>
 	(disable-timer timer-boar)
-	(set-strategic-number sn-minimum-number-hunters 6)
-	(set-strategic-number sn-minimum-boar-hunt-group-size 6)
+	(set-strategic-number sn-minimum-number-hunters 7)
+	(set-strategic-number sn-minimum-boar-hunt-group-size 7)
 	(set-goal gl-boar-state 2)
 	(enable-timer timer-boar 60)
-	(chat-to-player my-player-number "[MASTER] Boar at the TC -> 6 hunters")
+	(chat-to-player my-player-number "[MASTER] Boar at the TC -> hunters swarm")
 )
 (defrule
 	(goal gl-boar-state 2)
@@ -596,6 +626,7 @@
 	(set-strategic-number sn-minimum-boar-hunt-group-size 0)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1000)
 	(set-goal gl-boar-state 0)
+	(up-modify-goal gl-boars-done c:+ 1)
 	(disable-timer timer-boar)
 )
 
@@ -823,8 +854,19 @@
 => (up-modify-sn sn-gold-gatherer-percentage c:- 6)(up-modify-sn sn-food-gatherer-percentage c:+ 4)(up-modify-sn sn-wood-gatherer-percentage c:+ 2))
 (defrule (current-age >= castle-age)(food-amount > 1300)(strategic-number sn-food-gatherer-percentage > 25)
 => (up-modify-sn sn-food-gatherer-percentage c:- 10)(up-modify-sn sn-gold-gatherer-percentage c:+ 10))
-; Stone PILE -> stop over-mining stone, put it on wood.
-(defrule (stone-amount > 600)(strategic-number sn-stone-gatherer-percentage > 2)
+; DYNAMIC BALANCER (user, v2.10.0 — "500w/0f/3000g must never happen"): the phase
+; rules set the base %, these shift it EVERY pass while a skew persists, floors
+; guarded. Big skew -> big shift; the market (below) is the last resort.
+(defrule (gold-amount > 1000)(food-amount < 200)(strategic-number sn-gold-gatherer-percentage > 12)
+=> (up-modify-sn sn-gold-gatherer-percentage c:- 10)(up-modify-sn sn-food-gatherer-percentage c:+ 10))
+(defrule (gold-amount > 2500)(strategic-number sn-gold-gatherer-percentage > 8)
+=> (up-modify-sn sn-gold-gatherer-percentage c:- 8)(up-modify-sn sn-food-gatherer-percentage c:+ 5)(up-modify-sn sn-wood-gatherer-percentage c:+ 3))
+(defrule (food-amount < 100)(wood-amount > 700)(strategic-number sn-wood-gatherer-percentage > 15)
+=> (up-modify-sn sn-wood-gatherer-percentage c:- 8)(up-modify-sn sn-food-gatherer-percentage c:+ 8))
+; Stone PILE -> stop over-mining stone, put it on wood. (v2.10.0: threshold raised
+; 600 -> 900 — it was throttling stone just BELOW the 650 a second castle costs,
+; which is why castle #2 never came despite "enough stone".)
+(defrule (stone-amount > 900)(strategic-number sn-stone-gatherer-percentage > 2)
 => (up-modify-sn sn-stone-gatherer-percentage c:- 4)(up-modify-sn sn-wood-gatherer-percentage c:+ 4))
 ; Stone SHORT while booming (user, v2.9.15): the 200 starting stone covers both
 ; boom TCs (100 each) — refill ONLY when the bank drops UNDER 200 (towers/TCs in
@@ -854,22 +896,38 @@
 ;endregion
 
 ;region ECONOMY: FARMS (Franks get farm upgrades free) ============================
+; v2.10.0 (user + Bambi): PARALLEL farm construction scales with age — 1-by-1
+; farming was throttling food. Feudal may run 2 pending, Castle 3, Imperial 4.
 (defrule
 	(current-age == dark-age)
 	(civilian-population >= 16)
 	(building-type-count-total mill > 0)
 	(idle-farm-count < 1)
 	(can-build farm)
-	(up-pending-objects c: farm < 2)
+	(up-pending-objects c: farm < 1)
 	(wood-amount > 80)
 => (build farm))
 (defrule
-	(current-age >= feudal-age)
+	(current-age == feudal-age)
 	(or (building-type-count-total stable > 0) (wood-amount > 180))
-	(idle-farm-count < 1)
+	(idle-farm-count < 2)
 	(can-build farm)
 	(up-pending-objects c: farm < 2)
 	(wood-amount > 100)
+=> (build farm))
+(defrule
+	(current-age == castle-age)
+	(idle-farm-count < 2)
+	(can-build farm)
+	(up-pending-objects c: farm < 3)
+	(wood-amount > 120)
+=> (build farm))
+(defrule
+	(current-age == imperial-age)
+	(idle-farm-count < 3)
+	(can-build farm)
+	(up-pending-objects c: farm < 4)
+	(wood-amount > 150)
 => (build farm))
 ;endregion
 
@@ -1048,6 +1106,19 @@
 	(build castle)
 	(chat-to-player my-player-number "[MASTER] Placing castle 2")
 )
+; v2.10.0 (user): if the stone keeps coming, keep castling — up to 4.
+(defrule
+	(current-age >= castle-age)
+	(building-type-count-total castle >= 2)
+	(building-type-count-total castle < 4)
+	(stone-amount > 800)
+	(can-build castle)
+	(up-pending-objects c: castle < 1)
+=>
+	(up-assign-builders c: castle c: 4)
+	(build castle)
+	(chat-to-player my-player-number "[MASTER] Placing another castle")
+)
 ;endregion
 
 ;region ANTI-CAVALRY EXTRAS =======================================================
@@ -1067,10 +1138,12 @@
 	(unit-type-count monk > 0)
 	(goal gl-enemy-cavalry off)
 => (up-set-attack-stance monk c: stance-no-attack))
+; v2.10.0 (user): defensive monks only converted once attacked themselves —
+; AGGRESSIVE while the cavalry/elephant threat is live so they convert on sight.
 (defrule
 	(unit-type-count monk > 0)
 	(goal gl-enemy-cavalry on)
-=> (up-set-attack-stance monk c: stance-defensive))
+=> (up-set-attack-stance monk c: stance-aggressive))
 ;endregion
 
 ;region FEUDAL FORK: SCOUT RUSH vs FAST CASTLE ====================================
@@ -1426,18 +1499,33 @@
 => (train skirmisher-line))
 ;endregion
 
-;region TSA-LITE: GROW DEFENDED RADIUS WITH ARMY ==================================
+;region TSA: BAMBI-STYLE STEP LADDER (v2.10.0 — the old one stuck at 82) ==========
+; Old design required the army to keep GROWING by 4 per step and capped at <80, so
+; the radius froze at 82 forever. Bambi instead steps +5 on every attack wave while
+; the army clears a size threshold (38 @ 75 ... 50 @ 95, then +5 up to 500) and
+; chats "Checking N". Ours: on each attack-timer tick (this region sits ABOVE the
+; attack rules that consume the timer), +5 while the army is big enough for the
+; current radius — army >= 30 carries to 100, army >= 50 carries on to 200.
 (defrule (true) => (up-get-fact military-population 0 gl-my-army))
 (defrule
+	(timer-triggered timer-attack)
 	(current-age >= castle-age)
-	(up-compare-goal gl-my-army g:>= gl-town-size-step)
-	(strategic-number sn-maximum-town-size < 80)
-	(military-population >= 10)
+	(military-population >= 30)
+	(strategic-number sn-maximum-town-size < 100)
 	(up-compare-goal gl-home-threat < 3)
 =>
-	(up-modify-sn sn-maximum-town-size c:+ 4)
-	(up-modify-goal gl-town-size-step c:= gl-my-army)
-	(up-modify-goal gl-town-size-step c:+ 4)
+	(up-modify-sn sn-maximum-town-size c:+ 5)
+	(up-chat-data-to-self "[MASTER] TSA -> %d" s: sn-maximum-town-size)
+)
+(defrule
+	(timer-triggered timer-attack)
+	(military-population >= 50)
+	(strategic-number sn-maximum-town-size >= 100)
+	(strategic-number sn-maximum-town-size < 200)
+	(up-compare-goal gl-home-threat < 3)
+=>
+	(up-modify-sn sn-maximum-town-size c:+ 5)
+	(up-chat-data-to-self "[MASTER] TSA -> %d" s: sn-maximum-town-size)
 )
 ;endregion
 
@@ -1534,6 +1622,12 @@
 ; HARD ANTI-FLOAT: past these levels the stockpile is dead value no matter what.
 (defrule (food-amount > 2200)(can-sell-commodity food) => (sell-commodity food))
 (defrule (wood-amount > 1800)(can-sell-commodity wood) => (sell-commodity wood))
+; GOLD FLOAT -> FOOD FAMINE cure (user, v2.10.0: sat on 3000g with 0 food) — the
+; balancer shifts villagers first; past this threshold the market just BUYS food.
+(defrule
+	(current-age >= castle-age)(food-amount < 150)(gold-amount > 800)
+	(can-buy-commodity food)
+=> (buy-commodity food))
 (defrule
 	(current-age >= castle-age)(building-type-count-total castle == 0)
 	(stone-amount < 500)(wood-amount > 250)(gold-amount > 200)(can-buy-commodity stone)
@@ -1541,6 +1635,19 @@
 (defrule
 	(current-age >= imperial-age)(stone-amount > 500)(gold-amount < 200)(can-sell-commodity stone)
 => (sell-commodity stone))
+
+; MARKET TICKER (user): announce the FIRST time each market lever engages, so the
+; recording shows whether the market traded at all this game.
+(defrule (goal gl-debug on)(current-age == feudal-age)(food-amount > 850)(gold-amount < 180)(can-sell-commodity food)
+=> (chat-to-player my-player-number "[MASTER] market: selling food for gold")(disable-self))
+(defrule (goal gl-debug on)(gold-amount < 450)(or (food-amount > 1500) (wood-amount > 1200))(current-age >= castle-age)
+=> (chat-to-player my-player-number "[MASTER] market: float-converting to gold")(disable-self))
+(defrule (goal gl-debug on)(or (food-amount > 2200) (wood-amount > 1800))
+=> (chat-to-player my-player-number "[MASTER] market: hard anti-float dump")(disable-self))
+(defrule (goal gl-debug on)(current-age >= castle-age)(food-amount < 150)(gold-amount > 800)
+=> (chat-to-player my-player-number "[MASTER] market: BUYING food with gold float")(disable-self))
+(defrule (goal gl-debug on)(current-age >= castle-age)(building-type-count-total castle == 0)(stone-amount < 500)(wood-amount > 250)(gold-amount > 200)
+=> (chat-to-player my-player-number "[MASTER] market: buying stone for the castle")(disable-self))
 ;endregion
 
 ;region RESIGN ====================================================================
