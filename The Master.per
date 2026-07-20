@@ -1,5 +1,14 @@
 ;==================================================================================
-; THE MASTER - v2.12.0
+; THE MASTER - v2.13.0
+; v2.13.0 — BAMBI ECO PORT (user choice): the whole gather system now runs Bambi's
+;  architecture. Dark = per-villager one-shot ladder. Feudal = the food x gold
+;  STATE MATRIX driving toward the click (800f+200g), change-guarded so ANY flip
+;  (food back under 700 after making scouts) re-fires the right state — no
+;  one-way streets. Stone keeper +5/-5 in BOTH directions. Click = 7% gold from
+;  the moment Feudal research starts. Castle = splits keyed on TC COUNT. All
+;  wrapped in Bambi's restore->phases->snapshot->apply sandwich, with our
+;  Castle+ bias controller plugged in as the modifier stage.
+;
 ; v2.12.0 — six-point review (home-threat CONFIRMED WORKING in game — gen 3 stays):
 ;  (1) CIVILIAN DEFENSE (Bambi): after Loom -> offense 2 / defense 3 / militia 10,
 ;      villagers now fight in-town threats (the ignored tower!); stood down while
@@ -171,7 +180,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.12.0 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.13.0 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -241,6 +250,14 @@
 (defconst gl-bias-wood 33)         ;   (Barbarian/GamesGod architecture: allocation
 (defconst gl-bias-gold 34)         ;    lives in GOALS, SNs are recomputed mirrors)
 (defconst timer-eco 7)             ; eco-balancer controller tick (20s)
+(defconst feudal-food 500)         ; Bambi's eco thresholds (v2.13.0 port)
+(defconst nearly-castle-food 700)
+(defconst castle-food 800)
+(defconst castle-gold 200)
+(defconst gl-eco-fo 35)            ; snapshot of the eco STATE percentages —
+(defconst gl-eco-wo 36)            ;  Bambi's restore->phases->snapshot->apply
+(defconst gl-eco-go 37)            ;  sandwich keeps the bias mirror from
+(defconst gl-eco-so 38)            ;  accumulating on change-guarded phases
 (defconst enemy 3)                 ; player stance group for up-find-player
 (defconst find-closest 2)          ; up-find-player mode
 (defconst gl-search-remote-count 22) ; 3rd of the 4 consecutive search-state goals
@@ -749,182 +766,132 @@
 )
 ;endregion
 
-;region ECONOMY: GATHER DISTRIBUTION (Dark Age keeps >=6 on food) ==================
-(defrule
-	(current-age == dark-age)
-	(not (up-research-status c: feudal-age c:>= research-pending))
-	(civilian-population <= 6)
+;region ECONOMY: GATHER DISTRIBUTION (v2.13.0 — Bambi's system, ported whole) ====
+; Architecture = Bambi's sandwich: RESTORE the state (undo last pass's bias) ->
+; change-guarded PHASE rules adjust the state only when their condition flips
+; (two-way: food dropping back below a mark re-fires the earlier state) ->
+; SNAPSHOT the state -> APPLY the bias controller's offsets (Castle+). Feudal is
+; Bambi's food x gold STATE MATRIX driving toward the Castle click (800f + 200g).
+(defrule (true)
 =>
-	(set-strategic-number sn-food-gatherer-percentage 100)
-	(set-strategic-number sn-wood-gatherer-percentage 0)
-	(set-strategic-number sn-gold-gatherer-percentage 0)
-	(set-strategic-number sn-stone-gatherer-percentage 0)
-)
-(defrule
-	(current-age == dark-age)
-	(not (up-research-status c: feudal-age c:>= research-pending))
-	(civilian-population >= 7)
-	(civilian-population <= 8)
-=>
-	(set-strategic-number sn-food-gatherer-percentage 85)   ; ~6 food + 1-2 wood
-	(set-strategic-number sn-wood-gatherer-percentage 15)
-	(set-strategic-number sn-gold-gatherer-percentage 0)
-	(set-strategic-number sn-stone-gatherer-percentage 0)
-)
-(defrule
-	(current-age == dark-age)
-	(not (up-research-status c: feudal-age c:>= research-pending))
-	(civilian-population >= 9)
-	(civilian-population <= 11)
-=>
-	(set-strategic-number sn-food-gatherer-percentage 67)   ; ~6-7 food + 3-4 wood
-	(set-strategic-number sn-wood-gatherer-percentage 33)
-	(set-strategic-number sn-gold-gatherer-percentage 0)
-	(set-strategic-number sn-stone-gatherer-percentage 0)
-)
-(defrule
-	(current-age == dark-age)
-	(not (up-research-status c: feudal-age c:>= research-pending))
-	(civilian-population >= 12)
-=>
-	(set-strategic-number sn-food-gatherer-percentage 60)   ; caps wood ~8 by 20 pop
-	(set-strategic-number sn-wood-gatherer-percentage 40)
-	(set-strategic-number sn-gold-gatherer-percentage 0)
-	(set-strategic-number sn-stone-gatherer-percentage 0)
-)
-(defrule
-	(current-age == dark-age)
-	(not (up-research-status c: feudal-age c:>= research-pending))
-	(civilian-population >= 22)
-	(food-amount < 500)
-=>
-	(set-strategic-number sn-food-gatherer-percentage 78)
-	(set-strategic-number sn-wood-gatherer-percentage 22)
-	(set-strategic-number sn-gold-gatherer-percentage 0)
-	(set-strategic-number sn-stone-gatherer-percentage 0)
+	(up-modify-sn sn-food-gatherer-percentage g:= gl-eco-fo)
+	(up-modify-sn sn-wood-gatherer-percentage g:= gl-eco-wo)
+	(up-modify-sn sn-gold-gatherer-percentage g:= gl-eco-go)
+	(up-modify-sn sn-stone-gatherer-percentage g:= gl-eco-so)
 )
 
-; FEUDAL - SCOUT RUSH: wood-heavy for buildings/LCs/scouts, ~2 vils gold only.
-(defrule
-	(current-age == feudal-age)
-	(goal gl-plan 1)
-	(not (goal gl-scrush 3))
-	(not (up-research-status c: castle-age c:>= research-pending))
-=>
-	(set-strategic-number sn-food-gatherer-percentage 52)
-	(set-strategic-number sn-wood-gatherer-percentage 43)
-	(set-strategic-number sn-gold-gatherer-percentage 5)
-	(set-strategic-number sn-stone-gatherer-percentage 0)
-)
-; RUSH OVER -> stop buying scouts (90f each!), bank food+gold and CLICK CASTLE.
-(defrule
-	(current-age == feudal-age)
-	(goal gl-plan 1)
-	(goal gl-scrush 3)
-	(not (up-research-status c: castle-age c:>= research-pending))
-=>
-	(set-strategic-number sn-food-gatherer-percentage 58)
-	(set-strategic-number sn-wood-gatherer-percentage 28)
-	(set-strategic-number sn-gold-gatherer-percentage 14)
-	(set-strategic-number sn-stone-gatherer-percentage 0)
-)
-; FEUDAL - FAST CASTLE: food to bank the 800, ~2 vils gold, rest wood (we were short).
-(defrule
-	(current-age == feudal-age)
-	(goal gl-plan 2)
-	(not (up-research-status c: castle-age c:>= research-pending))
-=>
-	(set-strategic-number sn-food-gatherer-percentage 56)
-	(set-strategic-number sn-wood-gatherer-percentage 38)
-	(set-strategic-number sn-gold-gatherer-percentage 6)
-	(set-strategic-number sn-stone-gatherer-percentage 0)
-)
-; FEUDAL FLOAT GUARDS (v2.12.0, user: 1200 food & no gold — the Castle click was
-; BLOCKED ON GOLD while food piled). These sit BELOW the feudal phase rules, so
-; they positionally override them whenever they apply.
-(defrule
-	(current-age == feudal-age)
-	(not (up-research-status c: castle-age c:>= research-pending))
-	(food-amount > 700)
-	(gold-amount < 250)
-=>
-	(set-strategic-number sn-food-gatherer-percentage 30)
-	(set-strategic-number sn-wood-gatherer-percentage 40)
-	(set-strategic-number sn-gold-gatherer-percentage 30)
-)
-; Bambi's feudal stone keeper: if the 200 start-stone was spent (towers!), top it
-; back up BEFORE the click — +5% from wood while under 200. (The phase rules re-set
-; stone to 0 each pass, so this one-step override is exactly +5 while it applies.)
-(defrule
-	(current-age == feudal-age)
-	(not (up-research-status c: castle-age c:>= research-pending))
+; DARK LADDER (Bambi R8-R29): one-shot per villager milestone; <7 is the re-catcher.
+(defrule (current-age == dark-age)(civilian-population < 7)(strategic-number sn-food-gatherer-percentage != 100)
+=> (set-strategic-number sn-food-gatherer-percentage 100)(set-strategic-number sn-wood-gatherer-percentage 0)(set-strategic-number sn-gold-gatherer-percentage 0)(set-strategic-number sn-stone-gatherer-percentage 0))
+(defrule (current-age == dark-age)(not (civilian-population < 7))  => (set-strategic-number sn-food-gatherer-percentage 86)(set-strategic-number sn-wood-gatherer-percentage 14)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 8))  => (set-strategic-number sn-food-gatherer-percentage 75)(set-strategic-number sn-wood-gatherer-percentage 25)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 9))  => (set-strategic-number sn-food-gatherer-percentage 67)(set-strategic-number sn-wood-gatherer-percentage 33)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 10)) => (set-strategic-number sn-food-gatherer-percentage 60)(set-strategic-number sn-wood-gatherer-percentage 40)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 11)) => (set-strategic-number sn-food-gatherer-percentage 64)(set-strategic-number sn-wood-gatherer-percentage 36)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 12)) => (set-strategic-number sn-food-gatherer-percentage 67)(set-strategic-number sn-wood-gatherer-percentage 33)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 13)) => (set-strategic-number sn-food-gatherer-percentage 69)(set-strategic-number sn-wood-gatherer-percentage 31)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 14)) => (set-strategic-number sn-food-gatherer-percentage 71)(set-strategic-number sn-wood-gatherer-percentage 29)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 15)) => (set-strategic-number sn-food-gatherer-percentage 73)(set-strategic-number sn-wood-gatherer-percentage 27)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 16)) => (set-strategic-number sn-food-gatherer-percentage 75)(set-strategic-number sn-wood-gatherer-percentage 25)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 17)) => (set-strategic-number sn-food-gatherer-percentage 76)(set-strategic-number sn-wood-gatherer-percentage 24)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 18)) => (set-strategic-number sn-food-gatherer-percentage 78)(set-strategic-number sn-wood-gatherer-percentage 22)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 19)) => (set-strategic-number sn-food-gatherer-percentage 74)(set-strategic-number sn-wood-gatherer-percentage 26)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 20)) => (set-strategic-number sn-food-gatherer-percentage 70)(set-strategic-number sn-wood-gatherer-percentage 30)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 21)) => (set-strategic-number sn-food-gatherer-percentage 67)(set-strategic-number sn-wood-gatherer-percentage 33)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 22)) => (set-strategic-number sn-food-gatherer-percentage 64)(set-strategic-number sn-wood-gatherer-percentage 36)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 23)) => (set-strategic-number sn-food-gatherer-percentage 61)(set-strategic-number sn-wood-gatherer-percentage 39)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 24)) => (set-strategic-number sn-food-gatherer-percentage 58)(set-strategic-number sn-wood-gatherer-percentage 42)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 25))(food-amount >= feudal-food)
+=> (set-strategic-number sn-food-gatherer-percentage 56)(set-strategic-number sn-wood-gatherer-percentage 40)(set-strategic-number sn-gold-gatherer-percentage 4)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 26))(food-amount >= feudal-food)
+=> (set-strategic-number sn-food-gatherer-percentage 54)(set-strategic-number sn-wood-gatherer-percentage 42)(set-strategic-number sn-gold-gatherer-percentage 4)(disable-self))
+(defrule (current-age == dark-age)(not (civilian-population < 27))(food-amount >= feudal-food)
+=> (set-strategic-number sn-food-gatherer-percentage 52)(set-strategic-number sn-wood-gatherer-percentage 44)(set-strategic-number sn-gold-gatherer-percentage 4)(disable-self))
+
+; FEUDAL PENDING (Bambi R30): gold starts DURING the age research (user point).
+(defrule (up-research-status c: feudal-age c:>= research-pending)(current-age == dark-age)
+=> (set-strategic-number sn-food-gatherer-percentage 53)(set-strategic-number sn-wood-gatherer-percentage 40)(set-strategic-number sn-gold-gatherer-percentage 7)(set-strategic-number sn-stone-gatherer-percentage 0)(disable-self))
+
+; FEUDAL STATE MATRIX (Bambi R31-R35) — drives toward the click: 800 food + 200
+; gold. Change-guarded on a signature value, so ANY flip re-fires its state.
+(defrule (current-age == feudal-age)(not (up-research-status c: castle-age c:>= research-pending))
+	(food-amount < nearly-castle-food)(gold-amount < castle-gold)
+	(strategic-number sn-food-gatherer-percentage != 53)
+=> (set-strategic-number sn-food-gatherer-percentage 53)(set-strategic-number sn-wood-gatherer-percentage 40)(set-strategic-number sn-gold-gatherer-percentage 7)
+   (chat-to-player my-player-number "[MASTER] eco: feudal baseline 53/40/7"))
+(defrule (current-age == feudal-age)(not (up-research-status c: castle-age c:>= research-pending))
+	(food-amount >= castle-food)(gold-amount < castle-gold)
+	(strategic-number sn-food-gatherer-percentage != 45)
+=> (set-strategic-number sn-food-gatherer-percentage 45)(set-strategic-number sn-wood-gatherer-percentage 40)(set-strategic-number sn-gold-gatherer-percentage 15)
+   (chat-to-player my-player-number "[MASTER] eco: food banked -> gold push 45/40/15"))
+(defrule (current-age == feudal-age)(not (up-research-status c: castle-age c:>= research-pending))
+	(food-amount < nearly-castle-food)(gold-amount >= castle-gold)
+	(building-type-count-total blacksmith > 0)
+	(strategic-number sn-food-gatherer-percentage != 60)
+=> (set-strategic-number sn-food-gatherer-percentage 60)(set-strategic-number sn-wood-gatherer-percentage 40)(set-strategic-number sn-gold-gatherer-percentage 0)
+   (chat-to-player my-player-number "[MASTER] eco: gold done -> food 60/40/0"))
+(defrule (current-age == feudal-age)(not (up-research-status c: castle-age c:>= research-pending))
+	(food-amount < nearly-castle-food)(gold-amount >= castle-gold)
+	(building-type-count-total blacksmith < 1)
+	(strategic-number sn-food-gatherer-percentage != 44)
+=> (set-strategic-number sn-food-gatherer-percentage 44)(set-strategic-number sn-wood-gatherer-percentage 56)(set-strategic-number sn-gold-gatherer-percentage 0)
+   (chat-to-player my-player-number "[MASTER] eco: need buildings -> wood 44/56/0"))
+(defrule (current-age == feudal-age)(not (up-research-status c: castle-age c:>= research-pending))
+	(food-amount >= castle-food)(gold-amount >= castle-gold)
+	(building-type-count-total blacksmith < 1)
+	(strategic-number sn-food-gatherer-percentage != 44)
+=> (set-strategic-number sn-food-gatherer-percentage 44)(set-strategic-number sn-wood-gatherer-percentage 56)(set-strategic-number sn-gold-gatherer-percentage 0))
+
+; FEUDAL STONE KEEPER (Bambi R36-R37, BOTH directions — user: no one-way streets).
+(defrule (current-age == feudal-age)(not (up-research-status c: castle-age c:>= research-pending))
+	(stone-amount < 200)(strategic-number sn-stone-gatherer-percentage == 0)
+=> (up-modify-sn sn-stone-gatherer-percentage c:+ 5)(up-modify-sn sn-wood-gatherer-percentage c:- 5))
+(defrule (current-age == feudal-age)(not (up-research-status c: castle-age c:>= research-pending))
+	(stone-amount >= 200)(strategic-number sn-stone-gatherer-percentage == 5)
+=> (up-modify-sn sn-stone-gatherer-percentage c:- 5)(up-modify-sn sn-wood-gatherer-percentage c:+ 5))
+
+; CASTLE CLICKED (Bambi R38-R39): stone only if the 200 bank was spent.
+(defrule (up-research-status c: castle-age c:>= research-pending)(current-age == feudal-age)
 	(stone-amount < 200)
-	(strategic-number sn-stone-gatherer-percentage == 0)
-=>
-	(up-modify-sn sn-stone-gatherer-percentage c:+ 5)
-	(up-modify-sn sn-wood-gatherer-percentage c:- 5)
-)
-
-; CLICKING CASTLE (either plan). Stone maths (user, v2.9.15): we START with 200
-; stone = exactly TC#2 + TC#3 (100 each) — mine stone at the click ONLY if the bank
-; was raided (towers) or the eco is big enough to afford insurance (>30 vills).
-(defrule
-	(current-age == feudal-age)
-	(up-research-status c: castle-age c:>= research-pending)
-	(or (stone-amount < 200) (civilian-population > 30))
-=>
-	(set-strategic-number sn-food-gatherer-percentage 46)
-	(set-strategic-number sn-wood-gatherer-percentage 34)
-	(set-strategic-number sn-gold-gatherer-percentage 12)
-	(set-strategic-number sn-stone-gatherer-percentage 8)
-)
-(defrule
-	(current-age == feudal-age)
-	(up-research-status c: castle-age c:>= research-pending)
+	(or (strategic-number sn-gold-gatherer-percentage != 5)(strategic-number sn-stone-gatherer-percentage != 5))
+=> (set-strategic-number sn-food-gatherer-percentage 45)(set-strategic-number sn-wood-gatherer-percentage 45)(set-strategic-number sn-gold-gatherer-percentage 5)(set-strategic-number sn-stone-gatherer-percentage 5))
+(defrule (up-research-status c: castle-age c:>= research-pending)(current-age == feudal-age)
 	(stone-amount >= 200)
-	(civilian-population <= 30)
-=>
-	(set-strategic-number sn-food-gatherer-percentage 48)
-	(set-strategic-number sn-wood-gatherer-percentage 36)
-	(set-strategic-number sn-gold-gatherer-percentage 16)
-	(set-strategic-number sn-stone-gatherer-percentage 0)
-)
+	(or (strategic-number sn-stone-gatherer-percentage != 0)(strategic-number sn-gold-gatherer-percentage != 5))
+=> (set-strategic-number sn-food-gatherer-percentage 45)(set-strategic-number sn-wood-gatherer-percentage 50)(set-strategic-number sn-gold-gatherer-percentage 5)(set-strategic-number sn-stone-gatherer-percentage 0))
 
-; Castle Age: KNIGHT eco — keep >=12 on wood (TCs/LCs/farms), good gold, light stone.
-(defrule
-	(current-age == castle-age)
-=>
-	(set-strategic-number sn-food-gatherer-percentage 42)
-	(set-strategic-number sn-wood-gatherer-percentage 30)
-	(set-strategic-number sn-gold-gatherer-percentage 23)
-	(set-strategic-number sn-stone-gatherer-percentage 5)
-)
+; CASTLE AGE by TC COUNT (Bambi R42/R44/R46, land variants), IMPERIAL (R48).
+(defrule (current-age == castle-age)(building-type-count town-center == 1)
+	(strategic-number sn-wood-gatherer-percentage != 50)
+=> (set-strategic-number sn-food-gatherer-percentage 45)(set-strategic-number sn-wood-gatherer-percentage 50)(set-strategic-number sn-gold-gatherer-percentage 5)(set-strategic-number sn-stone-gatherer-percentage 0))
+(defrule (current-age == castle-age)(building-type-count town-center == 2)
+	(strategic-number sn-wood-gatherer-percentage != 45)
+=> (set-strategic-number sn-food-gatherer-percentage 45)(set-strategic-number sn-wood-gatherer-percentage 45)(set-strategic-number sn-gold-gatherer-percentage 10)(set-strategic-number sn-stone-gatherer-percentage 0))
+(defrule (current-age == castle-age)(building-type-count town-center >= 3)
+	(strategic-number sn-wood-gatherer-percentage != 35)
+=> (set-strategic-number sn-food-gatherer-percentage 45)(set-strategic-number sn-wood-gatherer-percentage 35)(set-strategic-number sn-gold-gatherer-percentage 15)(set-strategic-number sn-stone-gatherer-percentage 5))
+(defrule (current-age == imperial-age)
+	(strategic-number sn-wood-gatherer-percentage != 34)
+=> (set-strategic-number sn-food-gatherer-percentage 45)(set-strategic-number sn-wood-gatherer-percentage 34)(set-strategic-number sn-gold-gatherer-percentage 16)(set-strategic-number sn-stone-gatherer-percentage 5))
 
-(defrule
-	(current-age == imperial-age)
-	(gold-amount < 700)
+; SNAPSHOT the state, then APPLY the bias controller's offsets (Castle+ only).
+(defrule (true)
 =>
-	(set-strategic-number sn-food-gatherer-percentage 40)
-	(set-strategic-number sn-wood-gatherer-percentage 25)
-	(set-strategic-number sn-gold-gatherer-percentage 30)
-	(set-strategic-number sn-stone-gatherer-percentage 5)
+	(up-modify-goal gl-eco-fo s:= sn-food-gatherer-percentage)
+	(up-modify-goal gl-eco-wo s:= sn-wood-gatherer-percentage)
+	(up-modify-goal gl-eco-go s:= sn-gold-gatherer-percentage)
+	(up-modify-goal gl-eco-so s:= sn-stone-gatherer-percentage)
 )
-(defrule
-	(current-age == imperial-age)
-	(gold-amount >= 700)
+(defrule (current-age >= castle-age)
 =>
-	(set-strategic-number sn-food-gatherer-percentage 45)
-	(set-strategic-number sn-wood-gatherer-percentage 33)
-	(set-strategic-number sn-gold-gatherer-percentage 17)
-	(set-strategic-number sn-stone-gatherer-percentage 5)
+	(up-modify-sn sn-food-gatherer-percentage g:+ gl-bias-food)
+	(up-modify-sn sn-wood-gatherer-percentage g:+ gl-bias-wood)
+	(up-modify-sn sn-gold-gatherer-percentage g:+ gl-bias-gold)
 )
 ;endregion
 
 ;region FLEXIBLE ECO (rebalance whichever way it's unbalanced) =====================
-; Feudal-only wood-float nudge (Castle+ skews are the bias controller's job below —
-; running both would double-correct).
-(defrule (current-age == feudal-age)(wood-amount > 800)(strategic-number sn-wood-gatherer-percentage > 22)
-=> (up-modify-sn sn-wood-gatherer-percentage c:- 12)(up-modify-sn sn-food-gatherer-percentage c:+ 8)(up-modify-sn sn-gold-gatherer-percentage c:+ 4))
+; (feudal floats are handled by the Bambi state matrix in the gather region)
 ; DYNAMIC BALANCER v2 (v2.11.0 — studied Promisory/Rehoboam/Barbarian/HordeDE/
 ; GamesGod). The v2.10.0 per-pass nudges could NEVER accumulate: the phase rules
 ; re-set the base every pass, capping the response at one step — that is why 3000
@@ -968,14 +935,7 @@
 => (up-modify-goal gl-bias-food c:+ 4)(up-modify-goal gl-bias-wood c:- 4))
 (defrule (true) => (enable-timer timer-eco 20)(disable-self))
 (defrule (timer-triggered timer-eco) => (disable-timer timer-eco)(enable-timer timer-eco 20))
-; MIRROR: every pass, after the phase rules re-set the bases above, apply the
-; accumulated biases (worst case: castle base gold 23 - 18 = 5, never negative).
-(defrule (current-age >= castle-age)
-=>
-	(up-modify-sn sn-food-gatherer-percentage g:+ gl-bias-food)
-	(up-modify-sn sn-wood-gatherer-percentage g:+ gl-bias-wood)
-	(up-modify-sn sn-gold-gatherer-percentage g:+ gl-bias-gold)
-)
+; (bias MIRROR moved into the gather region's sandwich — v2.13.0)
 ; Stone PILE -> stop over-mining stone, put it on wood. (v2.10.0: threshold raised
 ; 600 -> 900 — it was throttling stone just BELOW the 650 a second castle costs,
 ; which is why castle #2 never came despite "enough stone".)
