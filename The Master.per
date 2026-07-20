@@ -1,5 +1,14 @@
 ;==================================================================================
-; THE MASTER - v2.9.14
+; THE MASTER - v2.9.15
+; v2.9.15 — two user catches on v2.9.14:
+;  * STONE MATHS: we START with 200 stone = exactly the two boom TCs. Mine at the
+;    Castle click only if the bank is raided (< 200, towers) or vills > 30; refill
+;    rules likewise trigger under 200, never on a full bank.
+;  * 200-POP FREEZE: army gates used population-headroom, which is ALSO small near
+;    the lobby cap — the army would have frozen at 196/200 forever. Gates now read
+;    housing-headroom (the houses-lag signal) with an endgame exception: within 6
+;    of the lobby cap the army fills every last slot.
+;
 ; Age of Empires II: Definitive Edition AI.  Focus civ: FRANKS ("base civ").
 ; Plan: Scouts/FC -> Knights, Throwing Axemen vs spears/camels, Skirms vs archers.
 ; Scope: 1v1, Arabia, vs random-civ DE AI (Hardest).   Author: interlepus@yahoo.com
@@ -95,7 +104,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.9.14 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.9.15 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -434,7 +443,7 @@
 => (build monastery))
 (defrule
 	(building-type-count monastery > 0)
-	(population-headroom > 4)
+	(or (housing-headroom > 4) (population-headroom <= 6))
 	(can-train monk)
 	(unit-type-count-total monk < 3)
 => (train monk))
@@ -442,7 +451,7 @@
 (defrule
 	(goal gl-enemy-cavalry on)
 	(building-type-count monastery > 0)
-	(population-headroom > 4)
+	(or (housing-headroom > 4) (population-headroom <= 6))
 	(can-train monk)
 	(unit-type-count-total monk < 5)
 => (train monk))
@@ -727,15 +736,29 @@
 	(set-strategic-number sn-gold-gatherer-percentage 6)
 	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
-; CLICKING CASTLE (either plan): start stone now so TCs/castle can go up on arrival.
+; CLICKING CASTLE (either plan). Stone maths (user, v2.9.15): we START with 200
+; stone = exactly TC#2 + TC#3 (100 each) — mine stone at the click ONLY if the bank
+; was raided (towers) or the eco is big enough to afford insurance (>30 vills).
 (defrule
 	(current-age == feudal-age)
 	(up-research-status c: castle-age c:>= research-pending)
+	(or (stone-amount < 200) (civilian-population > 30))
 =>
 	(set-strategic-number sn-food-gatherer-percentage 46)
 	(set-strategic-number sn-wood-gatherer-percentage 34)
 	(set-strategic-number sn-gold-gatherer-percentage 12)
 	(set-strategic-number sn-stone-gatherer-percentage 8)
+)
+(defrule
+	(current-age == feudal-age)
+	(up-research-status c: castle-age c:>= research-pending)
+	(stone-amount >= 200)
+	(civilian-population <= 30)
+=>
+	(set-strategic-number sn-food-gatherer-percentage 48)
+	(set-strategic-number sn-wood-gatherer-percentage 36)
+	(set-strategic-number sn-gold-gatherer-percentage 16)
+	(set-strategic-number sn-stone-gatherer-percentage 0)
 )
 
 ; Castle Age: KNIGHT eco — keep >=12 on wood (TCs/LCs/farms), good gold, light stone.
@@ -781,12 +804,13 @@
 ; Stone PILE -> stop over-mining stone, put it on wood.
 (defrule (stone-amount > 600)(strategic-number sn-stone-gatherer-percentage > 2)
 => (up-modify-sn sn-stone-gatherer-percentage c:- 4)(up-modify-sn sn-wood-gatherer-percentage c:+ 4))
-; Stone SHORT while booming (user, v2.9.14): a TC is 275w+100s and every defensive
-; tower ate 125s — replenish while low or TC#3 stalls waiting on stone.
-(defrule (current-age >= castle-age)(building-type-count-total town-center < 3)(stone-amount < 220)
+; Stone SHORT while booming (user, v2.9.15): the 200 starting stone covers both
+; boom TCs (100 each) — refill ONLY when the bank drops UNDER 200 (towers/TCs in
+; flight spent it), never on a full bank.
+(defrule (current-age >= castle-age)(building-type-count-total town-center < 3)(stone-amount < 200)
 	(strategic-number sn-stone-gatherer-percentage < 10)
 => (up-modify-sn sn-stone-gatherer-percentage c:+ 5)(up-modify-sn sn-food-gatherer-percentage c:- 5))
-(defrule (current-age >= castle-age)(building-type-count-total watch-tower > 0)(stone-amount < 300)
+(defrule (current-age >= castle-age)(building-type-count-total watch-tower > 0)(stone-amount < 200)
 	(strategic-number sn-stone-gatherer-percentage < 12)
 => (up-modify-sn sn-stone-gatherer-percentage c:+ 4)(up-modify-sn sn-food-gatherer-percentage c:- 4))
 
@@ -1203,7 +1227,7 @@
 	(or (goal gl-enemy-anti-cav on) (goal gl-enemy-infantry on))
 	(current-age >= castle-age)
 	(building-type-count siege-workshop > 0)
-	(population-headroom > 4)
+	(or (housing-headroom > 4) (population-headroom <= 6))
 	(can-train scorpion-line)
 	(unit-type-count-total scorpion-line < 3)
 => (train scorpion-line))
@@ -1289,12 +1313,17 @@
 ;endregion
 
 ;region MILITARY: KNIGHTS (core) ==================================================
-; ECO FIRST (user, v2.9.14): villager rules sit ABOVE the army in rule order, but
+; ECO FIRST (user, v2.9.14/15): villager rules sit ABOVE the army in rule order, but
 ; they also politely require housing headroom — while army rules had NO such gate,
 ; so under housing pressure soldiers ate the last pop slots and the TCs idled.
-; Standing army trains only with >4 headroom; reactive counters below yield at >2;
-; feudal defence rules stay ungated (a raid answer outranks one villager).
-(defrule (current-age >= castle-age)(population-headroom > 4)(can-train knight-line) => (train knight-line))
+; Standing army yields while HOUSES lag (housing-headroom <= 4); reactive counters
+; yield at <= 2; feudal defence stays ungated. ENDGAME EXCEPTION (user, v2.9.15):
+; near the LOBBY cap (population-headroom <= 6) the gate opens again — otherwise
+; the army would freeze at 196/200 and strand the last slots forever.
+(defrule (current-age >= castle-age)
+	(or (housing-headroom > 4) (population-headroom <= 6))
+	(can-train knight-line)
+=> (train knight-line))
 ;endregion
 
 ;region MILITARY: COUNTERS ========================================================
@@ -1303,7 +1332,7 @@
 (defrule
 	(or (goal gl-enemy-anti-cav on) (goal gl-enemy-infantry on))
 	(building-type-count castle > 0)
-	(population-headroom > 4)
+	(or (housing-headroom > 4) (population-headroom <= 6))
 	(can-train throwing-axeman-line)
 	(unit-type-count-total throwing-axeman-line < 14)
 => (train throwing-axeman-line))
@@ -1313,7 +1342,7 @@
 	(or (players-unit-type-count any-enemy camel-line >= 4)
 	    (players-unit-type-count any-enemy mclass-war-elephant >= 2))
 	(current-age >= castle-age)
-	(population-headroom > 2)
+	(or (housing-headroom > 2) (population-headroom <= 6))
 	(can-train spearman-line)
 	(unit-type-count-total spearman-line < 10)
 => (train spearman-line))
@@ -1321,7 +1350,7 @@
 (defrule
 	(goal gl-enemy-ranged on)
 	(building-type-count archery-range > 0)
-	(population-headroom > 2)
+	(or (housing-headroom > 2) (population-headroom <= 6))
 	(can-train skirmisher-line)
 	(unit-type-count-total skirmisher-line < 14)
 => (train skirmisher-line))
@@ -1330,7 +1359,7 @@
 	(goal gl-enemy-ranged on)
 	(current-age >= castle-age)
 	(building-type-count siege-workshop > 0)
-	(population-headroom > 4)
+	(or (housing-headroom > 4) (population-headroom <= 6))
 	(can-train mangonel-line)
 	(unit-type-count-total mangonel-line < 3)
 => (train mangonel-line))
