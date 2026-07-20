@@ -1,5 +1,16 @@
 ;==================================================================================
-; THE MASTER - v2.13.0
+; THE MASTER - v2.14.0
+; v2.14.0 — (1) HOUSING FREEZE, deep fix: raiders killing the builders leave a 0%
+;  foundation that counts as a pending OBJECT (blocks the ladder gate) but not a
+;  pending PLACEMENT (guards never clear it). Every guard tick now re-issues
+;  up-assign-builders for any type with pending objects — dead crews are replaced
+;  within 7s. Plus a housed-zero emergency that orders another house past the
+;  pending gate. (sn-placement-zone-size/fail-delta escalation researched via
+;  rAge — deferred: engine defaults undocumented.)
+; (2) BOAR: late-found boars now lure through FEUDAL (Bambi has no age gate) and
+;  the lurer is freed explicitly with up-retask-gatherers (Bambi) on top of
+;  up-request-hunters; exit also handles the 65535 no-carcass sentinel.
+;
 ; v2.13.0 — BAMBI ECO PORT (user choice): the whole gather system now runs Bambi's
 ;  architecture. Dark = per-villager one-shot ladder. Feudal = the food x gold
 ;  STATE MATRIX driving toward the click (800f+200g), change-guarded so ANY flip
@@ -180,7 +191,7 @@
 
 ;region IDENTITY & GREETING ========================================================
 (defrule (true) => (up-change-name "Meistar") (disable-self))
-(defrule (game-time > 4) => (chat-to-all "The Master v2.13.0 -- Meistar. GL HF!") (disable-self))
+(defrule (game-time > 4) => (chat-to-all "The Master v2.14.0 -- Meistar. GL HF!") (disable-self))
 ;endregion
 
 ;region CONSTANTS ==================================================================
@@ -423,6 +434,18 @@
 (defrule (goal gl-guard-tick 1)(up-pending-placement c: castle)         => (up-reset-placement c: castle))
 (defrule (goal gl-guard-tick 1)(up-pending-placement c: monastery)      => (up-reset-placement c: monastery))
 (defrule (goal gl-guard-tick 1)(up-pending-placement c: watch-tower)    => (up-reset-placement c: watch-tower))
+; FOUNDATION RESCUE (v2.14.0 — the housing freeze that guards CANNOT see): when
+; raiders kill the builders, the 0% foundation still counts as a pending OBJECT
+; (blocking the house ladder's pending<2 gate) but is NOT a pending PLACEMENT, so
+; resets never touch it and it starves housing forever. Cure: every guard tick,
+; re-issue up-assign-builders for any type with pending objects — the engine
+; immediately tops the crew back up if the current builders are dead/short.
+(defrule (goal gl-guard-tick 1)(up-pending-objects c: house > 0)       => (up-assign-builders c: house c: 2))
+(defrule (goal gl-guard-tick 1)(up-pending-objects c: town-center > 0) => (up-assign-builders c: town-center c: 3))
+(defrule (goal gl-guard-tick 1)(up-pending-objects c: mining-camp > 0) => (up-assign-builders c: mining-camp c: 1))
+(defrule (goal gl-guard-tick 1)(up-pending-objects c: lumber-camp > 0) => (up-assign-builders c: lumber-camp c: 1))
+(defrule (goal gl-guard-tick 1)(up-pending-objects c: mill > 0)        => (up-assign-builders c: mill c: 1))
+(defrule (goal gl-guard-tick 1)(up-pending-objects c: castle > 0)      => (up-assign-builders c: castle c: 4))
 (defrule (goal gl-guard-tick 1) => (set-goal gl-guard-tick 0))
 ;endregion
 
@@ -658,8 +681,12 @@
 ; specifically, independent of who happens to be eating. One state machine now
 ; serves EVERY boar (2, 3, 5 — any map): request 1 to lure, 6 on arrival, 0 on
 ; exit, then the cycle re-arms for the next live boar automatically.
+; v2.14.0 (user: a LATE-found boar was never lured): Bambi's entry has NO age gate
+; at all — any found boar in reach gets lured. Ours now runs through Feudal too
+; (a boar discovered after aging up is still 340 fast food). Bambi also frees the
+; lurer explicitly with up-retask-gatherers — adopted alongside request-hunters.
 (defrule
-	(current-age == dark-age)
+	(current-age <= feudal-age)
 	(civilian-population >= 14)
 	(goal gl-boar-state 0)
 	(dropsite-min-distance live-boar > -1)
@@ -667,6 +694,7 @@
 =>
 	(set-strategic-number sn-enable-boar-hunting 2)
 	(set-strategic-number sn-minimum-boar-lure-group-size 1)
+	(up-retask-gatherers food c: 1)
 	(up-request-hunters c: 1)
 	(set-goal gl-boar-state 1)
 	(enable-timer timer-boar 90)
@@ -686,7 +714,8 @@
 )
 (defrule
 	(goal gl-boar-state 2)
-	(or (up-remaining-boar-amount < 180) (dropsite-min-distance live-boar == -1))
+	(or (up-remaining-boar-amount < 180)
+	    (or (up-remaining-boar-amount == 65535) (dropsite-min-distance live-boar == -1)))
 =>
 	(set-strategic-number sn-enable-boar-hunting 1)
 	(set-strategic-number sn-minimum-boar-hunt-group-size 0)
@@ -1057,6 +1086,16 @@
 	(housing-headroom >= 4)
 	(goal gl-house-boost 1)
 => (set-goal gl-house-boost 0)(up-assign-builders c: house c: 1))
+
+; HOUSED-ZERO EMERGENCY (v2.14.0): if we are hard-housed but the ladder is blocked
+; by wedged pending houses (abandoned foundations), order ANOTHER house anyway —
+; being housed costs more than a spare 25-wood foundation ever can.
+(defrule
+	(housing-headroom == 0)
+	(population-headroom > 0)
+	(up-pending-objects c: house < 4)
+	(can-build house)
+=> (build house))
 
 ; Housing ladder (Bambi): build 5 ahead in Dark, 10 in Feudal, 15 in Castle, 20 in
 ; Imperial — production explodes with each age.
